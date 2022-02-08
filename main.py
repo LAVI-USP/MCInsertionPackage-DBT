@@ -18,9 +18,11 @@ for more information.
 import cv2
 import sys
 import subprocess
+import pandas as pd
 import pydicom
 import numpy as np
 import pathlib
+import zipfile
 import matplotlib.pyplot as plt
 
 from scipy.io import loadmat
@@ -42,8 +44,8 @@ from pydbt.functions.phantoms import phantom3d
 if __name__ == '__main__':
     
     
-    cluster_size = (200,200,28)
-    calc_window = (80,80,10)
+    cluster_size = (140,140,140)
+    calc_window = (56,56,56)
     number_calc = 8
         
     contrasts = [0.4]
@@ -52,6 +54,8 @@ if __name__ == '__main__':
 
     
     pathPatientCases ='/media/rodrigo/Data/images/UPenn/Phantom/VCT/VCT_Bruno_500/GE-projs'
+    pathCalcifications = '/media/rodrigo/Data/images/UPenn/Phantom/VCT/db_calcium/calc'
+    pathCalcificationsReport = '/media/rodrigo/Data/images/UPenn/Phantom/VCT/db_calcium/report.xlsx'
     pathMatlab = '/usr/local/R2019a/bin/matlab'
     pathDensityMask = pathPatientCases + '/PatientDensity'
     path2write = 'outputs'
@@ -185,35 +189,98 @@ if __name__ == '__main__':
         del final_mask
         
         # Avoid cluster on top or bottom 
-        vol[:,:,-(cluster_size[-1]+2):] = 0
-        vol[:,:,:(cluster_size[-1]+2)] = 0
+        vol[:,:,-(geo.nz//4):] = 0
+        vol[:,:,:(geo.nz//4)] = 0
                 
         # Ramdomly selects one of the possible points
         i,j,k = np.where(vol>0.5)
         randInt = np.random.randint(0,i.shape[0])
         coords = (i[randInt],j[randInt],k[randInt])
-
-        # Insert the MC Cluster
-        # inserted = insertMC(dcmData, maskMC[:,:,mcNum], coords, contrast, angle)
         
+        del vol       
         
 #%%      
         (x_pos, y_pos, z_pos), _ = getXYZpositions(number_calc, cluster_size, calc_window)
         
-        calc_3d = phantom3d('',
-                            n=10,
-                            phantom_matrix=np.array([[1.0, 0.69, 0.92, 0.81, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]]))
+        # Uncomment to use phantom calcification
+        # calc_3d = phantom3d('',
+        #                     n=10,
+        #                     phantom_matrix=np.array([[1.0, 0.69, 0.92, 0.81, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]]))
+        #   
+        # calcs_3D = number_calc * [calc_3d]
         
         
-        calcs_3D = number_calc * [calc_3d]
+        df = pd.read_excel(pathCalcificationsReport)
         
+        df = df[df['Type'] == 'calc']
+        df = df[df['BB_CountZ'] <= 10]
+             
+        rand_index = np.random.randint(0, df.shape[0], number_calc)
+
+        
+        calcs_3D = []
+
+        for idX in range(number_calc):
+            
+            
+            calc_size = (df.iloc[rand_index[idX]]['BB_CountY'], 
+                         df.iloc[rand_index[idX]]['BB_CountX'], 
+                         df.iloc[rand_index[idX]]['BB_CountZ'])
+            
+            calc_name = df.iloc[rand_index[idX]]['FileName'] + '_{}x{}x{}'.format(calc_size[1],
+                                                                                  calc_size[0],
+                                                                                  calc_size[2])
+            
+            # Extract zip in tmp folder
+            zip_ref =  zipfile.ZipFile("{}/{}.zip".format(pathCalcifications,
+                                                          calc_name),"r") 
+            zip_ref.extractall("/tmp")
+            
+            # Read .raw file
+            calc_3D = np.fromfile("/tmp/{}/{}.raw".format(calc_name,calc_name), dtype=np.uint8, sep="")
+            
+            # Reshape it 
+            calc_3D = calc_3D.reshape(calc_size)
+            
+            # Resize calc 3D
+            calc_3D_resize = np.empty((np.ceil(calc_3D.shape[0]/2).astype(int),
+                                       np.ceil(calc_3D.shape[1]/2).astype(int),
+                                       np.ceil(calc_3D.shape[2]/2).astype(int)))
+            
+            tmp_resize = np.empty((calc_3D.shape[0],
+                                   np.ceil(calc_3D.shape[1]/2).astype(int),
+                                   np.ceil(calc_3D.shape[2]/2).astype(int)))
+            
+            # Downsample YZ plane
+            for x in range(calc_3D.shape[0]):
+                
+                tmp_resize[x,:,:] = cv2.resize(np.uint8(calc_3D[x,:,:]),
+                                                (calc_3D_resize.shape[2], calc_3D_resize.shape[1]), 
+                                                1, 
+                                                1, 
+                                                cv2.INTER_CUBIC)
+                
+            # Downsample XY plane, keeping Y at the same size   
+            for z in range(calc_3D_resize.shape[-1]):
+                
+                calc_3D_resize[:,:,z] = cv2.resize(np.uint8(tmp_resize[:,:,z]),
+                                                (tmp_resize.shape[1], calc_3D_resize.shape[0]), 
+                                                1, 
+                                                1, 
+                                                cv2.INTER_CUBIC)
+            
+            calcs_3D.append(calc_3D_resize)
+        
+        del tmp_resize
+            
+    
         ROI_3D = np.zeros(cluster_size)
         
-        contrasts = np.hstack((1, np.linspace(0.5,1,100,endpoint=False)[np.random.randint(0,99,number_calc-1)]))
+        contrasts_local = np.hstack((1, np.linspace(0.5,1,100,endpoint=False)[np.random.randint(0,99,number_calc-1)]))
         
         StackROI=[];
         
-        for idX, (calc_3D, contrast) in enumerate(zip(calcs_3D, contrasts)):
+        for idX, (calc_3D, contrast) in enumerate(zip(calcs_3D, contrasts_local)):
             
             calc_3D = contrast * (calc_3D / calc_3D.max())
             
@@ -221,16 +288,33 @@ if __name__ == '__main__':
                    y_pos[idX]-(calc_3D.shape[1]//2):y_pos[idX]-(calc_3D.shape[1]//2)+calc_3D.shape[1],
                    z_pos[idX]-(calc_3D.shape[2]//2):z_pos[idX]-(calc_3D.shape[2]//2)+calc_3D.shape[2]] +=  calc_3D
             
-        del  calcs_3D, calc_3d
+        del  calcs_3D, calc_3D
         
 #%% 
+
+        """
+        Here, we are recreating the volume but now with higher resolution on
+        the Z axis.      
+        """
+
+        # We add an offset to the airgap so we dont need to project the
+        # slices that dont have information.
+        vol_z_offset = (coords[2]*geo.dz) - (ROI_3D.shape[2]//2*0.1)
         
-        vol[:] = 0
+        # We refresh the geometry parameters
+        geo.nz = ROI_3D.shape[2]
+        geo.dz = 0.1
+        geo.DAG += vol_z_offset
+        
+        # Create a empty volume specific for that part (calcification cluster)
+        vol = np.zeros((geo.ny, geo.nx, geo.nz))
+        
+        # Load the cluster on this volume. Note that Z has the same size
         vol[coords[0]-(ROI_3D.shape[0]//2):coords[0]-(ROI_3D.shape[0]//2)+ROI_3D.shape[0],
             coords[1]-(ROI_3D.shape[1]//2):coords[1]-(ROI_3D.shape[1]//2)+ROI_3D.shape[1],
-            coords[2]-(ROI_3D.shape[2]//2):coords[2]-(ROI_3D.shape[2]//2)+ROI_3D.shape[2]] += ROI_3D
+            :] += ROI_3D
         
-        
+        # Project this volume
         projs_masks = projectionDDb(np.float64(vol), geo, libFiles)
         
         makedir(path2write_patient_name)
@@ -243,7 +327,7 @@ if __name__ == '__main__':
                         
             tmp_mask = np.abs(projs_masks[:,:,ind])
             tmp_mask = (tmp_mask - tmp_mask.min()) / (tmp_mask.max() - tmp_mask.min())
-            tmp_mask[tmp_mask > 0] *= 0.3
+            tmp_mask[tmp_mask > 0] *= 0.1
             tmp_mask = 1 - tmp_mask
             
             dcmData[:,1500:] = dcmData[:,1500:] * tmp_mask
