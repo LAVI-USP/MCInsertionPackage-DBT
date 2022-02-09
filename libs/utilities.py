@@ -74,7 +74,7 @@ for idX, k in enumerate(cluster_PDF_history):
     tmp = (k - k.min()) / (k.max() - k.min())
     tmp *= 65535
     os.mkdir('outputs_{}'.format(idX)) 
-    for x in range(200):
+    for x in range(k.shape[-1]):
         plt.imsave('outputs_{}/{}.tiff'.format(idX, x), np.uint16(tmp[:,:,x]), cmap='gray', vmin=0, vmax=65535)
 
     
