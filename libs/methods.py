@@ -28,7 +28,7 @@ from pydbt.functions.initialConfig import initialConfig
 #                                                                             #
 #-----------------------------------------------------------------------------#
 
-def get_XYZ_cluster_positions(final_mask, buildDir, flag_print=True):
+def get_XYZ_cluster_positions(final_mask, bdyThick, buildDir, flag_print=True):
     
     if flag_print:
         print("Reconstructing density mask and generate random coords for cluster...")
@@ -40,9 +40,17 @@ def get_XYZ_cluster_positions(final_mask, buildDir, flag_print=True):
     geo = geometry_settings()
     geo.GE()
     
+    # Find the X boundary
+    bound_X = int(np.where(np.sum(final_mask[:,:,0], axis=0) > 1)[0][0]) - 10
+    
+    # Crop to save reconstruction time
+    final_mask = final_mask[:,bound_X:,:]
+    
+    geo.nx = final_mask.shape[1]      # number of voxels (columns)
+    geo.ny = final_mask.shape[0]      # number of voxels (rows)
     geo.nu = final_mask.shape[1]      # number of pixels (columns)
     geo.nv = final_mask.shape[0]      # number of pixels (rows)
-    geo.nz = 127                      # Breast -> 63.3m
+    geo.nz = np.ceil(bdyThick/geo.dz).astype(int)
     
     vol = backprojectionDDb(np.float64(final_mask), geo, libFiles)
         
@@ -53,9 +61,9 @@ def get_XYZ_cluster_positions(final_mask, buildDir, flag_print=True):
     # Ramdomly selects one of the possible points
     i,j,k = np.where(vol>0.5)
     randInt = np.random.randint(0,i.shape[0])
-    x_pos, y_pos, z_pos = (i[randInt],j[randInt],k[randInt])
+    y_pos, x_pos, z_pos = (i[randInt],j[randInt],k[randInt])
     
-    return (x_pos, y_pos, z_pos), geo, libFiles
+    return (x_pos, y_pos, z_pos), geo, libFiles, bound_X
 
 #-----------------------------------------------------------------------------#
 #                                                                             #
@@ -198,39 +206,41 @@ def get_calc_cluster(pathCalcifications, pathCalcificationsReport, number_calc, 
         # Reshape it 
         calc_3D = calc_3D.reshape(calc_size)
         
-        # Resize calc 3D
-        calc_3D_resize = np.empty((np.ceil(calc_3D.shape[0]/2).astype(int),
-                                   np.ceil(calc_3D.shape[1]/2).astype(int),
-                                   np.ceil(calc_3D.shape[2]/2).astype(int)))
+        # # Resize calc 3D
+        # calc_3D_resize = np.empty((np.ceil(calc_3D.shape[0]/2).astype(int),
+        #                            np.ceil(calc_3D.shape[1]/2).astype(int),
+        #                            np.ceil(calc_3D.shape[2]/2).astype(int)))
         
-        tmp_resize = np.empty((calc_3D.shape[0],
-                               np.ceil(calc_3D.shape[1]/2).astype(int),
-                               np.ceil(calc_3D.shape[2]/2).astype(int)))
+        # tmp_resize = np.empty((calc_3D.shape[0],
+        #                        np.ceil(calc_3D.shape[1]/2).astype(int),
+        #                        np.ceil(calc_3D.shape[2]/2).astype(int)))
         
-        # Downsample YZ plane
-        for x in range(calc_3D.shape[0]):
+        # # Downsample YZ plane
+        # for x in range(calc_3D.shape[0]):
             
-            tmp_resize[x,:,:] = cv2.resize(np.uint8(calc_3D[x,:,:]),
-                                            (calc_3D_resize.shape[2], calc_3D_resize.shape[1]), 
-                                            1, 
-                                            1, 
-                                            cv2.INTER_NEAREST)
+        #     tmp_resize[x,:,:] = cv2.resize(np.uint8(calc_3D[x,:,:]),
+        #                                     (calc_3D_resize.shape[2], calc_3D_resize.shape[1]), 
+        #                                     1, 
+        #                                     1, 
+        #                                     cv2.INTER_NEAREST)
             
-        # Downsample XY plane, keeping Y at the same size   
-        for z in range(calc_3D_resize.shape[-1]):
+        # # Downsample XY plane, keeping Y at the same size   
+        # for z in range(calc_3D_resize.shape[-1]):
             
-            calc_3D_resize[:,:,z] = cv2.resize(np.uint8(tmp_resize[:,:,z]),
-                                            (tmp_resize.shape[1], calc_3D_resize.shape[0]), 
-                                            1, 
-                                            1, 
-                                            cv2.INTER_NEAREST)
+        #     calc_3D_resize[:,:,z] = cv2.resize(np.uint8(tmp_resize[:,:,z]),
+        #                                     (tmp_resize.shape[1], calc_3D_resize.shape[0]), 
+        #                                     1, 
+        #                                     1, 
+        #                                     cv2.INTER_NEAREST)
                         
 
-        calc_3D_resize = contrast * (calc_3D_resize / calc_3D_resize.max())
+        # calc_3D_resize = contrast * (calc_3D_resize / calc_3D_resize.max())
         
-        roi_3D[x_calc[idX]-(calc_3D_resize.shape[0]//2):x_calc[idX]-(calc_3D_resize.shape[0]//2)+calc_3D_resize.shape[0],
-               y_calc[idX]-(calc_3D_resize.shape[1]//2):y_calc[idX]-(calc_3D_resize.shape[1]//2)+calc_3D_resize.shape[1],
-               z_calc[idX]-(calc_3D_resize.shape[2]//2):z_calc[idX]-(calc_3D_resize.shape[2]//2)+calc_3D_resize.shape[2]] +=  calc_3D_resize
+        calc_3D = contrast * (calc_3D / calc_3D.max())
+        
+        roi_3D[x_calc[idX]-(calc_3D.shape[0]//2):x_calc[idX]-(calc_3D.shape[0]//2)+calc_3D.shape[0],
+               y_calc[idX]-(calc_3D.shape[1]//2):y_calc[idX]-(calc_3D.shape[1]//2)+calc_3D.shape[1],
+               z_calc[idX]-(calc_3D.shape[2]//2):z_calc[idX]-(calc_3D.shape[2]//2)+calc_3D.shape[2]] +=  calc_3D
     
     return roi_3D
 
@@ -238,7 +248,7 @@ def get_calc_cluster(pathCalcifications, pathCalcificationsReport, number_calc, 
 #                                                                             #
 #-----------------------------------------------------------------------------#
 
-def get_breast_masks(dcmFiles, patient_case, pathPatientDensity, pathLibra, pathMatlab, deleteMask=False, flag_print=True):
+def get_breast_masks(dcmFiles, patient_case, pathPatientDensity, pathLibra, pathMatlab, deleteMask=False, flag_print=True, vct_image=False):
     
         patient_name = patient_case.split('/')[-1]
         
@@ -261,34 +271,54 @@ def get_breast_masks(dcmFiles, patient_case, pathPatientDensity, pathLibra, path
                 
         for idX, dcmFile in enumerate(dcmFiles):
             
-            ind = int(str(dcmFile).split('/')[-1].split('.')[0][1:])
+            ind = int(str(dcmFile).split('/')[-1].split('_')[1]) - 1
             
             if not flag_mask_found:
             
                 dcmH = pydicom.dcmread(str(dcmFile))
                                                 
-                '''As we are using DBT, we need to change some header param'''
+                # As we are using DBT, we need to change some header param
                 dcmH.ImagesInAcquisition = '1'
                 dcmH.Manufacturer = 'GE MEDICAL'
-                # ViewPosition
-                dcmH.add_new((0x0018,0x5101),'CS', 'CC')
-                # BodyPartThickness
-                dcmH.add_new((0x0018,0x11A0),'DS', 60)
-                # CompressionForce
-                dcmH.add_new((0x0018,0x11A2),'DS', 119.5)
-                # ExposureTime
-                dcmH.add_new((0x0018,0x1150),'DS', 770)
-                # XrayTubeCurrent
-                dcmH.add_new((0x0018,0x1151),'DS', 100)
-                # Exposure
-                dcmH.add_new((0x0018,0x1152),'DS', 87)
-                # ExposureInuAs
-                dcmH.add_new((0x0018,0x1153),'DS', 86800)
-                # kvP
-                dcmH.add_new((0x0018,0x0060),'DS', 29)
                 
+                if vct_image:
+                    # Simulate random parameters for VCT data
+    
+                    # ViewPosition
+                    dcmH.add_new((0x0018,0x5101),'CS', 'CC')
+                    # BodyPartThickness
+                    dcmH.add_new((0x0018,0x11A0),'DS', 60)
+                    # CompressionForce
+                    dcmH.add_new((0x0018,0x11A2),'DS', 119.5)
+                    # ExposureTime
+                    dcmH.add_new((0x0018,0x1150),'DS', 770)
+                    # XrayTubeCurrent
+                    dcmH.add_new((0x0018,0x1151),'DS', 100)
+                    # Exposure
+                    dcmH.add_new((0x0018,0x1152),'DS', 87)
+                    # ExposureInuAs
+                    dcmH.add_new((0x0018,0x1153),'DS', 86800)
+                    # kvP
+                    dcmH.add_new((0x0018,0x0060),'DS', 29)
+                    
+                else:
+                    # BodyPartThickness
+                    dcmH.add_new((0x0018,0x11A0),'FL', dcmH.BodyPartThickness)
+                    # CompressionForce
+                    dcmH.add_new((0x0018,0x11A2),'FL', dcmH.CompressionForce)
+                    # ExposureTime
+                    dcmH.add_new((0x0018,0x1150),'FL', dcmH.ExposureTime)
+                    # XrayTubeCurrent
+                    dcmH.add_new((0x0018,0x1151),'FL', dcmH.XRayTubeCurrent)
+                    # Exposure
+                    dcmH.add_new((0x0018,0x1152),'FL', dcmH.Exposure)
+                    # ExposureInuAs
+                    dcmH.add_new((0x0018,0x1153),'FL', dcmH.ExposureInuAs)
+                    # kvP
+                    dcmH.add_new((0x0018,0x0060),'FL', dcmH.KVP)
                 
-                dcmFile_tmp = path2write_patient_name + '{}{}'.format(filesep(), dcmFile.split('/')[-1])
+                                
+                dcmFile_tmp = path2write_patient_name + '{}{}.dcm'.format(filesep(), ind)
                 
                 pydicom.dcmwrite(dcmFile_tmp,
                                  dcmH, 
@@ -301,15 +331,22 @@ def get_breast_masks(dcmFiles, patient_case, pathPatientDensity, pathLibra, path
                                                               path2write_patient_name), shell=True)
         
             # Read masks from LIBRA
-            res = loadmat('{}{}Result_Images{}Masks__{}.mat'.format(path2write_patient_name, filesep(), filesep(), ind))['res']
+            res = loadmat('{}{}Result_Images{}Masks_{}.mat'.format(path2write_patient_name, filesep(), filesep(), ind))['res']
             
             mask_dense[ind] = res['DenseMask'][0][0]
             mask_breast[ind] = res['BreastMask'][0][0]
-            
+        
+        
+        if not flag_mask_found:
+            bdyThick = np.float32(dcmH.BodyPartThickness)
+            np.save('{}{}Result_Images{}bodyPartThickness'.format(path2write_patient_name, filesep(), filesep()), bdyThick)
+        else:
+            bdyThick = np.load('{}{}Result_Images{}bodyPartThickness.npy'.format(path2write_patient_name, filesep(), filesep()))   
+        
         if deleteMask:              
             removedir(path2write_patient_name)
                 
-        return mask_dense, mask_breast
+        return mask_dense, mask_breast, bdyThick
     
 #-----------------------------------------------------------------------------#
 #                                                                             #
@@ -323,9 +360,19 @@ def process_dense_mask(mask_dense, mask_breast, cluster_size, flag_print=True):
     mask_dense = np.stack(mask_dense, axis=-1)
     mask_breast = np.stack(mask_breast, axis=-1)
     
+    if np.sum(mask_breast[:,0:10,0]) != 0:
+        
+        flag_right_breast = False
+        mask_dense = np.fliplr(mask_dense)
+        mask_breast = np.fliplr(mask_breast)
+        
+    else:
+        
+        flag_right_breast = True
+    
     # Crop
-    mask_dense = mask_dense[:,1500:,:]
-    mask_breast = mask_breast[:,1500:,:]
+    # mask_dense = mask_dense[:,1500:,:]
+    # mask_breast = mask_breast[:,1500:,:]
     
     # Mask erosion to avoid regions too close to the skin, chest-wall and
     # pectoral muscle
@@ -356,7 +403,7 @@ def process_dense_mask(mask_dense, mask_breast, cluster_size, flag_print=True):
     # Map of possible positions
     final_mask = mask_breast * mask_dense
     
-    return final_mask
+    return final_mask, flag_right_breast
 
 #-----------------------------------------------------------------------------#
 #                                                                             #

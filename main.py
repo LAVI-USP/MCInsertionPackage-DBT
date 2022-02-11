@@ -25,9 +25,9 @@ import matplotlib.pyplot as plt
 sys.path.insert(1, '/home/rodrigo/Documents/rodrigo/codes/pyDBT')
 
 from pydbt.functions.dataPreProcess import dataPreProcess
-from pydbt.functions.projectionDDb import projectionDDb
+from pydbt.functions.projectionDD import projectionDD
 
-from libs.utilities import makedir, filesep
+from libs.utilities import makedir, filesep, writeDicom
 from libs.methods import get_XYZ_calc_positions, get_breast_masks, process_dense_mask, \
     get_calc_cluster, get_XYZ_cluster_positions
 
@@ -40,10 +40,10 @@ if __name__ == '__main__':
     cluster_dimensions  = (14,14,14)        # In mm
     calc_dimensions     = (5.6,5.6,5.6)     # In mm
     
-    cluster_pixel_size = 0.1                # In mm
+    cluster_pixel_size = 0.05               # In mm
     
     
-    pathPatientCases            ='/media/rodrigo/Data/images/UPenn/Phantom/VCT/VCT_Bruno_500/GE-projs'
+    pathPatientCases            = '/home/rodrigo/Downloads/Bi-Rads_1/1729110/DBT'#'/media/rodrigo/Data/images/UPenn/Phantom/VCT/VCT_Bruno_500/GE-projs'
     pathCalcifications          = '/media/rodrigo/Data/images/UPenn/Phantom/VCT/db_calcium/calc'
     pathCalcificationsReport    = '/media/rodrigo/Data/images/UPenn/Phantom/VCT/db_calcium/report.xlsx'
     pathMatlab                  = '/usr/local/R2019a/bin/matlab'
@@ -81,17 +81,17 @@ if __name__ == '__main__':
         dcmFiles = [str(item) for item in pathlib.Path(patient_case).glob("*.dcm")]
         
         # Run LIBRA
-        mask_dense, mask_breast = get_breast_masks(dcmFiles, patient_case, pathPatientDensity, pathLibra, pathMatlab)
+        mask_dense, mask_breast, bdyThick = get_breast_masks(dcmFiles, patient_case, pathPatientDensity, pathLibra, pathMatlab)
         
         # Process dense mask
-        final_mask = process_dense_mask(mask_dense, mask_breast, cluster_size)
+        final_mask, flag_right_breast = process_dense_mask(mask_dense, mask_breast, cluster_size)
         
         del mask_dense, mask_breast
         
         #%%
         
         # Reconstruct the dense mask and find the coords for the cluster
-        (x_clust, y_clust, z_clust), geo, libFiles = get_XYZ_cluster_positions(final_mask, pathBuildDirpyDBT)
+        (x_clust, y_clust, z_clust), geo, libFiles, bound_X = get_XYZ_cluster_positions(final_mask, bdyThick, pathBuildDirpyDBT)
         
         del final_mask
         
@@ -106,23 +106,30 @@ if __name__ == '__main__':
 
         # We add an offset to the airgap so we dont need to project the
         # slices that dont have information.
-        vol_z_offset = (z_clust*geo.dz) - (roi_3D.shape[2]//2*cluster_pixel_size)
+        vol_z_offset = (z_clust * geo.dz) - (roi_3D.shape[2]//2*cluster_pixel_size)
+        
+        geo.x_offset = x_clust * geo.dx 
+        geo.y_offset = (np.arange(-geo.ny/2, (geo.ny/2)+1, 1) * geo.dy)[y_clust]
         
         # We refresh the geometry parameters
+        geo.nx = roi_3D.shape[0]
+        geo.ny = roi_3D.shape[1]
         geo.nz = roi_3D.shape[2]
+        
+        geo.dx = cluster_pixel_size
+        geo.dy = cluster_pixel_size
         geo.dz = cluster_pixel_size
+        
         geo.DAG += vol_z_offset
         
         # Create a empty volume specific for that part (calcification cluster)
         vol = np.zeros((geo.ny, geo.nx, geo.nz))
         
         # Load the cluster on this volume. Note that Z has the same size
-        vol[x_clust-(roi_3D.shape[0]//2):x_clust-(roi_3D.shape[0]//2)+roi_3D.shape[0],
-            y_clust-(roi_3D.shape[1]//2):y_clust-(roi_3D.shape[1]//2)+roi_3D.shape[1],
-            :] = roi_3D
+        vol = roi_3D
         
         # Project this volume
-        projs_masks = projectionDDb(np.float64(vol), geo, libFiles)
+        projs_masks = projectionDD(np.float64(vol), geo, libFiles)
         
         
         for contrast in contrasts:
@@ -136,23 +143,31 @@ if __name__ == '__main__':
                 dcmH = pydicom.dcmread(str(dcmFile))
                 
                 dcmData = dcmH.pixel_array.astype('float32').copy()
+                                
+                if not flag_right_breast:
+                    dcmData = np.fliplr(dcmData)
                 
-                ind = int(str(dcmFiles[idX]).split('/')[-1].split('.')[0][1:])
+                ind = int(str(dcmFile).split('/')[-1].split('_')[1]) - 1
                             
                 tmp_mask = np.abs(projs_masks[:,:,ind])
                 tmp_mask = (tmp_mask - tmp_mask.min()) / (tmp_mask.max() - tmp_mask.min())
                 tmp_mask[tmp_mask > 0] *= contrast
                 tmp_mask = 1 - tmp_mask
                 
-                dcmData[:,1500:] = dcmData[:,1500:] * tmp_mask
+                dcmData[:,bound_X:] = dcmData[:,bound_X:] * tmp_mask
+                
+                if not flag_right_breast:
+                    dcmData = np.fliplr(dcmData)
                             
-                dcmH.PixelData = np.uint16(dcmData).copy()
+                # dcmH.PixelData = np.uint16(dcmData).copy()
                 
                 dcmFile_tmp = path2write_patient_name + '{}{}'.format(filesep(), dcmFiles[idX].split('/')[-1])
                 
-                pydicom.dcmwrite(dcmFile_tmp,
-                                 dcmH, 
-                                 write_like_original=True) 
+                writeDicom(dcmFile_tmp, np.uint16(dcmData))
+                
+                # pydicom.dcmwrite(dcmFile_tmp,
+                #                  dcmH, 
+                #                  write_like_original=False) 
             
             
             
