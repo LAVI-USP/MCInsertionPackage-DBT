@@ -20,9 +20,51 @@ from scipy.stats import multivariate_normal
 from .utilities import makedir, removedir, filesep
 
 from pydbt.functions.phantoms import phantom3d
-from pydbt.functions.backprojectionDDb import backprojectionDDb
+from pydbt.functions.projection_operators import backprojectionDDb_cuda, projectionDD
 from pydbt.parameters.parameterSettings import geometry_settings
 from pydbt.functions.initialConfig import initialConfig
+
+#-----------------------------------------------------------------------------#
+#                                                                             #
+#-----------------------------------------------------------------------------#
+
+def get_projection_cluster_mask(roi_3D, geo, x_clust, y_clust, z_clust, cluster_pixel_size, libFiles):
+    
+    """
+    Here, we are recreating the volume but now with higher resolution on
+    the Z axis.      
+    """
+    
+    print("Inserting cluster at position and projecting the cluster mask...")
+    
+    # We add an offset to the airgap so we dont need to project the
+    # slices that dont have information.
+    vol_z_offset = (z_clust * geo.dz) - (roi_3D.shape[2]//2*cluster_pixel_size)
+    
+    geo.x_offset = ((geo.nx - 1) - x_clust) * geo.dx 
+    geo.y_offset = (y_clust - (geo.ny/2)) * geo.dy
+    
+    # We refresh the geometry parameters
+    geo.nx = roi_3D.shape[0]
+    geo.ny = roi_3D.shape[1]
+    geo.nz = roi_3D.shape[2]
+    
+    geo.dx = cluster_pixel_size
+    geo.dy = cluster_pixel_size
+    geo.dz = cluster_pixel_size
+    
+    geo.DAG += vol_z_offset
+    
+    # Create a empty volume specific for that part (calcification cluster)
+    vol = np.zeros((geo.ny, geo.nx, geo.nz))
+    
+    # Load the cluster on this volume. Note that Z has the same size
+    vol = roi_3D
+    
+    # Project this volume
+    projs_masks = projectionDD(np.float64(vol), geo, -1, libFiles)
+    
+    return projs_masks
 
 #-----------------------------------------------------------------------------#
 #                                                                             #
@@ -52,7 +94,7 @@ def get_XYZ_cluster_positions(final_mask, bdyThick, buildDir, flag_print=True):
     geo.nv = final_mask.shape[0]      # number of pixels (rows)
     geo.nz = np.ceil(bdyThick/geo.dz).astype(int)
     
-    vol = backprojectionDDb(np.float64(final_mask), geo, libFiles)
+    vol = backprojectionDDb_cuda(np.float64(final_mask), geo, -1, libFiles)
         
     # Avoid cluster on top or bottom 
     vol[:,:,-(geo.nz//4):] = 0
@@ -206,36 +248,6 @@ def get_calc_cluster(pathCalcifications, pathCalcificationsReport, number_calc, 
         # Reshape it 
         calc_3D = calc_3D.reshape(calc_size)
         
-        # # Resize calc 3D
-        # calc_3D_resize = np.empty((np.ceil(calc_3D.shape[0]/2).astype(int),
-        #                            np.ceil(calc_3D.shape[1]/2).astype(int),
-        #                            np.ceil(calc_3D.shape[2]/2).astype(int)))
-        
-        # tmp_resize = np.empty((calc_3D.shape[0],
-        #                        np.ceil(calc_3D.shape[1]/2).astype(int),
-        #                        np.ceil(calc_3D.shape[2]/2).astype(int)))
-        
-        # # Downsample YZ plane
-        # for x in range(calc_3D.shape[0]):
-            
-        #     tmp_resize[x,:,:] = cv2.resize(np.uint8(calc_3D[x,:,:]),
-        #                                     (calc_3D_resize.shape[2], calc_3D_resize.shape[1]), 
-        #                                     1, 
-        #                                     1, 
-        #                                     cv2.INTER_NEAREST)
-            
-        # # Downsample XY plane, keeping Y at the same size   
-        # for z in range(calc_3D_resize.shape[-1]):
-            
-        #     calc_3D_resize[:,:,z] = cv2.resize(np.uint8(tmp_resize[:,:,z]),
-        #                                     (tmp_resize.shape[1], calc_3D_resize.shape[0]), 
-        #                                     1, 
-        #                                     1, 
-        #                                     cv2.INTER_NEAREST)
-                        
-
-        # calc_3D_resize = contrast * (calc_3D_resize / calc_3D_resize.max())
-        
         calc_3D = contrast * (calc_3D / calc_3D.max())
         
         roi_3D[x_calc[idX]-(calc_3D.shape[0]//2):x_calc[idX]-(calc_3D.shape[0]//2)+calc_3D.shape[0],
@@ -250,9 +262,8 @@ def get_calc_cluster(pathCalcifications, pathCalcificationsReport, number_calc, 
 
 def get_breast_masks(dcmFiles, patient_case, pathPatientDensity, pathLibra, pathMatlab, deleteMask=False, flag_print=True, vct_image=False):
     
-        patient_name = patient_case.split('/')[-1]
         
-        path2write_patient_name = "{}{}{}".format(pathPatientDensity , filesep(), patient_name)
+        path2write_patient_name = "{}{}{}".format(pathPatientDensity , filesep(), "/".join(patient_case.split('/')[-3:]))
         
         if makedir(path2write_patient_name):
             flag_mask_found = True
