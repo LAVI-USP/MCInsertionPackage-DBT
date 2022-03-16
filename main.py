@@ -39,21 +39,31 @@ if __name__ == '__main__':
     cluster_pixel_size = 0.05               # In mm
     
     
-    pathPatientCases            = '/home/rodrigo/Downloads/Bi-Rads_1'
+    pathPatientCases            = '/home/rodrigo/Downloads/mc_insert'
     pathCalcifications          = '/media/rodrigo/Data/images/UPenn/Phantom/VCT/db_calcium/calc'
     pathCalcificationsReport    = '/media/rodrigo/Data/images/UPenn/Phantom/VCT/db_calcium/report.xlsx'
     pathMatlab                  = '/usr/local/R2019a/bin/matlab'
     pathLibra                   = 'LIBRA-1.0.4'
+    pathAuxLibs                 = 'libs'
     pathBuildDirpyDBT           = '/home/rodrigo/Documents/rodrigo/codes/pyDBT/build'
+    pathMTF                     = 'data/mtf_kernel_ffdm_pristina_fourier.npy'
     pathPatientDensity          = pathPatientCases + '/density'
     pathPatientCalcs            = pathPatientCases + '/calcifications'
+    
+    # Flags
+    flags = dict()
+    flags['fix_compression_paddle'] = False
+    flags['print_debug'] = True
+    flags['vct_image'] = False
+    flags['delete_masks_folder'] = False
+    flags['force_libra'] = False
     
     cluster_size = [int(x/cluster_pixel_size) for x in cluster_dimensions]
     calc_window  = [int(x/cluster_pixel_size) for x in calc_dimensions]
      
     contrasts = [0.2]
-    for x in range(14):
-        contrasts.append(0.85 * contrasts[x])
+    # for x in range(14):
+    #     contrasts.append(0.85 * contrasts[x])
     
     # List all patients    
     patient_cases = [str(item) for item in pathlib.Path(pathPatientCases).glob("*") if pathlib.Path(item).is_dir()]
@@ -70,10 +80,10 @@ if __name__ == '__main__':
             #%%     
             
             # Get  X, Y and Z position for each calcification
-            (x_calc, y_calc, z_calc), _ = get_XYZ_calc_positions(number_calc, cluster_size, calc_window)
+            (x_calc, y_calc, z_calc), _ = get_XYZ_calc_positions(number_calc, cluster_size, calc_window, flags)
             
             # Load each calcification and put them on specified position
-            roi_3D = get_calc_cluster(pathCalcifications, pathCalcificationsReport, number_calc, cluster_size, x_calc, y_calc, z_calc)
+            roi_3D = get_calc_cluster(pathCalcifications, pathCalcificationsReport, number_calc, cluster_size, x_calc, y_calc, z_calc, flags)
             
     
             #%%
@@ -81,17 +91,21 @@ if __name__ == '__main__':
             dcmFiles = [str(item) for item in pathlib.Path(exam).glob("*.dcm")]
             
             # Run LIBRA
-            mask_dense, mask_breast, bdyThick = get_breast_masks(dcmFiles, exam, pathPatientDensity, pathLibra, pathMatlab)
+            mask_dense, mask_breast, bdyThick = get_breast_masks(dcmFiles, exam, pathPatientDensity, pathLibra, pathMatlab, pathAuxLibs, flags)
             
             # Process dense mask
-            final_mask, flag_right_breast = process_dense_mask(mask_dense, mask_breast, cluster_size)
+            final_mask, flags = process_dense_mask(mask_dense, mask_breast, cluster_size, dcmFiles, flags)
+            
+            if flags['compression_paddle_found']:
+                print(exam)
+                continue
             
             del mask_dense, mask_breast
             
             #%%
             
             # Reconstruct the dense mask and find the coords for the cluster
-            (x_clust, y_clust, z_clust), geo, libFiles, bound_X = get_XYZ_cluster_positions(final_mask, bdyThick, pathBuildDirpyDBT)
+            (x_clust, y_clust, z_clust), geo, libFiles, bound_X = get_XYZ_cluster_positions(final_mask, bdyThick, pathBuildDirpyDBT, flags)
             
             del final_mask
             
@@ -104,7 +118,7 @@ if __name__ == '__main__':
             cluster_2D = np.mean(roi_3D, axis=-1)
             cluster_2D = 255*(cluster_2D - cluster_2D.min())/(cluster_2D.max() - cluster_2D.min())
             
-            if flag_right_breast:
+            if flags['right_breast']:
                 x_clust2save = x_clust+bound_X
             else:    
                 cluster_2D = np.fliplr(cluster_2D)
@@ -113,7 +127,15 @@ if __name__ == '__main__':
             plt.imsave("{}{}cluster_{}x_{}y_{}z.png".format(path2write_patient_name, filesep(), x_clust2save, y_clust, z_clust), cluster_2D, cmap='gray')
             
             # Inserting cluster at position and projecting the cluster mask
-            projs_masks = get_projection_cluster_mask(roi_3D, geo, x_clust, y_clust, z_clust, cluster_pixel_size, libFiles)
+            projs_masks = get_projection_cluster_mask(roi_3D, geo, x_clust, y_clust, z_clust, cluster_pixel_size, libFiles, flags)
+            
+            cropCoords_file = pathlib.Path('{}{}{}{}Result_Images{}cropCoords.npy'.format(pathPatientDensity , filesep(), "/".join(exam.split('/')[-3:]), filesep(), filesep()))
+            if cropCoords_file.is_file():
+                cropCoords = np.load(str(cropCoords_file))
+                flags['mask_crop'] = True
+            else:
+                flags['mask_crop'] = False
+            
 
             for contrast in contrasts:
             
@@ -126,12 +148,15 @@ if __name__ == '__main__':
                     dcmH = pydicom.dcmread(str(dcmFile))
                     
                     dcmData = dcmH.pixel_array.astype('float32').copy()
+                    
+                    if flags['mask_crop']:
+                        dcmData = dcmData[cropCoords[0]:cropCoords[1], cropCoords[2]:cropCoords[3]]
                                     
-                    if not flag_right_breast:
+                    if not flags['right_breast']:
                         dcmData = np.fliplr(dcmData)
                     
                     ind = int(str(dcmFile).split('/')[-1].split('_')[1]) - 1
-                                
+
                     tmp_mask = np.abs(projs_masks[:,:,ind])
                     tmp_mask = (tmp_mask - tmp_mask.min()) / (tmp_mask.max() - tmp_mask.min())
                     tmp_mask[tmp_mask > 0] *= contrast
@@ -139,18 +164,13 @@ if __name__ == '__main__':
                     
                     dcmData[:,bound_X:] = dcmData[:,bound_X:] * tmp_mask
                     
-                    if not flag_right_breast:
+                    if not flags['right_breast']:
                         dcmData = np.fliplr(dcmData)
-                                
-                    # dcmH.PixelData = np.uint16(dcmData).copy()
-                    
+                                                
                     dcmFile_tmp = path2write_contrast + '{}{}'.format(filesep(), dcmFiles[idX].split('/')[-1])
                     
                     writeDicom(dcmFile_tmp, np.uint16(dcmData))
-                    
-                    # pydicom.dcmwrite(dcmFile_tmp,
-                    #                  dcmH, 
-                    #                  write_like_original=False) 
+ 
             
             
             

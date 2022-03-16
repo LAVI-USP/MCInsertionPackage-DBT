@@ -142,6 +142,107 @@ def writeDicom(dcmFileName, dcmImg):
     
     return
 
+
+def writeDicomFromTemplate(dcmFileName, dcmImg, dcmH):
+    '''
+    
+    Description: Write Dicom file from dicom header template
+    
+    Input:
+        - dcmFileName = File name, e.g. "myDicom.dcm".
+        - dcmImg = image np array
+    
+    Output:
+        - 
+            
+    
+    Source:
+    
+    '''
+    
+    dcmImg = dcmImg.astype(np.uint16)
+
+    # print("Setting file meta information...")
+
+    # Populate required values for file meta information
+    meta = pydicom.Dataset()
+    
+    meta.MediaStorageSOPClassUID = dcmH.file_meta.MediaStorageSOPClassUID
+    meta.MediaStorageSOPInstanceUID = dcmH.file_meta.MediaStorageSOPInstanceUID
+    meta.TransferSyntaxUID = pydicom.uid.ExplicitVRLittleEndian 
+    
+    ds = pydicom.Dataset()
+    ds.file_meta = meta
+    
+    # ViewPosition
+    ds.add_new((0x0018,0x5101),'CS', dcmH.ViewPosition)    
+    # BodyPartThickness
+    ds.add_new((0x0018,0x11A0),'FL', dcmH.BodyPartThickness)
+    # CompressionForce
+    ds.add_new((0x0018,0x11A2),'FL', dcmH.CompressionForce)
+    # ExposureTime
+    ds.add_new((0x0018,0x1150),'FL', dcmH.ExposureTime)
+    # XrayTubeCurrent
+    ds.add_new((0x0018,0x1151),'FL', dcmH.XRayTubeCurrent)
+    # Exposure
+    ds.add_new((0x0018,0x1152),'FL', dcmH.Exposure)
+    # ExposureInuAs
+    ds.add_new((0x0018,0x1153),'FL', dcmH.ExposureInuAs)
+    # kvP
+    ds.add_new((0x0018,0x0060),'FL', dcmH.KVP)
+    
+    
+    ds.is_little_endian = True
+    ds.is_implicit_VR = False
+    
+    ds.SOPClassUID = dcmH.SOPClassUID
+    ds.PatientName = dcmH.PatientName
+    ds.PatientID = dcmH.PatientID
+    
+    ds.PatientAge = dcmH.PatientAge
+    ds.ImagerPixelSpacing = dcmH.ImagerPixelSpacing
+    
+    ds.Modality = dcmH.Modality
+    ds.SeriesInstanceUID = dcmH.SeriesInstanceUID
+    ds.StudyInstanceUID = dcmH.StudyInstanceUID
+    ds.FrameOfReferenceUID = dcmH.FrameOfReferenceUID
+    
+    ds.BitsStored = 16
+    ds.BitsAllocated = 16
+    ds.SamplesPerPixel = 1
+    ds.HighBit = 15
+    
+    ds.ImagesInAcquisition = dcmH.ImagesInAcquisition
+    ds.Manufacturer = dcmH.Manufacturer
+    ds.DetectorElementSpacing = dcmH.DetectorElementSpacing
+    ds.ImagerPixelSpacing = dcmH.ImagerPixelSpacing
+    ds.PresentationIntentType = dcmH.PresentationIntentType
+    ds.ImageLaterality = dcmH.ImageLaterality
+    
+    ds.ViewCodeSequence = dcmH.ViewCodeSequence
+    
+    ds.Rows = dcmImg.shape[0]
+    ds.Columns = dcmImg.shape[1]
+    ds.InstanceNumber = dcmH.InstanceNumber
+    
+    ds.ImageType = dcmH.ImageType
+    
+    ds.RescaleIntercept = dcmH.RescaleIntercept
+    ds.RescaleSlope = dcmH.RescaleSlope
+
+    ds.PhotometricInterpretation = dcmH.PhotometricInterpretation
+    ds.PixelRepresentation = dcmH.PixelRepresentation
+    
+    pydicom.dataset.validate_file_meta(ds.file_meta, enforce_standard=True)
+    
+    # print("Setting pixel data...")
+    ds.PixelData = dcmImg.tobytes()
+    
+    ds.save_as(dcmFileName)  
+    
+    return
+
+
 '''
 
 for idX, k in enumerate(cluster_PDF_history):

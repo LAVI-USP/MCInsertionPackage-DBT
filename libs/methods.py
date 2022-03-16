@@ -28,14 +28,15 @@ from pydbt.functions.initialConfig import initialConfig
 #                                                                             #
 #-----------------------------------------------------------------------------#
 
-def get_projection_cluster_mask(roi_3D, geo, x_clust, y_clust, z_clust, cluster_pixel_size, libFiles):
+def get_projection_cluster_mask(roi_3D, geo, x_clust, y_clust, z_clust, cluster_pixel_size, libFiles, flags):
     
     """
     Here, we are recreating the volume but now with higher resolution on
     the Z axis.      
     """
     
-    print("Inserting cluster at position and projecting the cluster mask...")
+    if flags['print_debug']:
+        print("Inserting cluster at position and projecting the cluster mask...")
     
     # We add an offset to the airgap so we dont need to project the
     # slices that dont have information.
@@ -64,15 +65,18 @@ def get_projection_cluster_mask(roi_3D, geo, x_clust, y_clust, z_clust, cluster_
     # Project this volume
     projs_masks = projectionDD(np.float64(vol), geo, -1, libFiles)
     
+    if not flags['right_breast']:
+        projs_masks = np.flip(projs_masks, axis=-1)
+    
     return projs_masks
 
 #-----------------------------------------------------------------------------#
 #                                                                             #
 #-----------------------------------------------------------------------------#
 
-def get_XYZ_cluster_positions(final_mask, bdyThick, buildDir, flag_print=True):
+def get_XYZ_cluster_positions(final_mask, bdyThick, buildDir, flags):
     
-    if flag_print:
+    if flags['print_debug']:
         print("Reconstructing density mask and generate random coords for cluster...")
     
     # Call function for initial configurations
@@ -111,9 +115,9 @@ def get_XYZ_cluster_positions(final_mask, bdyThick, buildDir, flag_print=True):
 #                                                                             #
 #-----------------------------------------------------------------------------#
 
-def get_XYZ_calc_positions(number_calc, cluster_size, calc_window, flag_print=True):
+def get_XYZ_calc_positions(number_calc, cluster_size, calc_window, flags):
     
-    if flag_print:
+    if flags['print_debug']:
         print("Generating XYZ positions for each calcification...")
     
     x_pos = number_calc * [None]
@@ -179,9 +183,9 @@ def gauss3D(roi_size, stdev):
     
     mu = [x // 2 for x in roi_size]
     
-    xx, yy, zz = np.meshgrid(np.linspace(0,roi_size[0],roi_size[0]), 
-                             np.linspace(0,roi_size[1],roi_size[1]),
-                             np.linspace(0,roi_size[2],roi_size[2]))
+    xx, yy, zz = np.meshgrid(np.linspace(0,roi_size[0]-1,roi_size[0]), 
+                             np.linspace(0,roi_size[1]-1,roi_size[1]),
+                             np.linspace(0,roi_size[2]-1,roi_size[2]))
     
     xyz = np.column_stack([xx.flat, yy.flat, zz.flat])
 
@@ -202,9 +206,9 @@ def gauss3D(roi_size, stdev):
 #-----------------------------------------------------------------------------#
 
 
-def get_calc_cluster(pathCalcifications, pathCalcificationsReport, number_calc, cluster_size, x_calc, y_calc, z_calc, flag_print=True):
+def get_calc_cluster(pathCalcifications, pathCalcificationsReport, number_calc, cluster_size, x_calc, y_calc, z_calc, flags):
     
-    if flag_print:
+    if flags['print_debug']:
         print("Loading each calcification and placing them at each position...")
     
     # Uncomment to use phantom calcification
@@ -260,7 +264,7 @@ def get_calc_cluster(pathCalcifications, pathCalcificationsReport, number_calc, 
 #                                                                             #
 #-----------------------------------------------------------------------------#
 
-def get_breast_masks(dcmFiles, patient_case, pathPatientDensity, pathLibra, pathMatlab, deleteMask=False, flag_print=True, vct_image=False):
+def get_breast_masks(dcmFiles, patient_case, pathPatientDensity, pathLibra, pathMatlab, pathAuxLibs, flags):
     
         
         path2write_patient_name = "{}{}{}".format(pathPatientDensity , filesep(), "/".join(patient_case.split('/')[-3:]))
@@ -270,10 +274,10 @@ def get_breast_masks(dcmFiles, patient_case, pathPatientDensity, pathLibra, path
         else:
             flag_mask_found = False
             
-            if flag_print:
+            if flags['print_debug']:
                 print("Runing LIBRA to estimate density and breast mask...")
                 
-        if flag_print:
+        if flags['print_debug']:
             print("Loading density and breast mask...")
             
         mask_dense = len(dcmFiles) * [None]
@@ -284,7 +288,7 @@ def get_breast_masks(dcmFiles, patient_case, pathPatientDensity, pathLibra, path
             
             ind = int(str(dcmFile).split('/')[-1].split('_')[1]) - 1
             
-            if not flag_mask_found:
+            if not flag_mask_found or flags['force_libra']:
             
                 dcmH = pydicom.dcmread(str(dcmFile))
                                                 
@@ -292,7 +296,7 @@ def get_breast_masks(dcmFiles, patient_case, pathPatientDensity, pathLibra, path
                 dcmH.ImagesInAcquisition = '1'
                 dcmH.Manufacturer = 'GE MEDICAL'
                 
-                if vct_image:
+                if flags['vct_image']:
                     # Simulate random parameters for VCT data
     
                     # ViewPosition
@@ -336,8 +340,9 @@ def get_breast_masks(dcmFiles, patient_case, pathPatientDensity, pathLibra, path
                                  write_like_original=True) 
                 
                 
-                subprocess.run("{} -r \"addpath(genpath('{}'));addpath('libs');run('libra_startup');libra('{}', '{}', 1);exit\" -nodisplay -nosplash".format(pathMatlab,
+                subprocess.run("{} -r \"addpath(genpath('{}'));addpath('{}');run('libra_startup');libra('{}', '{}', 1);exit\" -nodisplay -nosplash".format(pathMatlab,
                                                               pathLibra,
+                                                              pathAuxLibs,
                                                               dcmFile_tmp,
                                                               path2write_patient_name), shell=True)
         
@@ -354,7 +359,7 @@ def get_breast_masks(dcmFiles, patient_case, pathPatientDensity, pathLibra, path
         else:
             bdyThick = np.load('{}{}Result_Images{}bodyPartThickness.npy'.format(path2write_patient_name, filesep(), filesep()))   
         
-        if deleteMask:              
+        if flags['delete_masks_folder']:              
             removedir(path2write_patient_name)
                 
         return mask_dense, mask_breast, bdyThick
@@ -363,27 +368,78 @@ def get_breast_masks(dcmFiles, patient_case, pathPatientDensity, pathLibra, path
 #                                                                             #
 #-----------------------------------------------------------------------------#
 
-def process_dense_mask(mask_dense, mask_breast, cluster_size, flag_print=True):
+def process_dense_mask(mask_dense, mask_breast, cluster_size, dcmFiles, flags):
     
-    if flag_print:
+    if flags['print_debug']:
         print("Processing density and breast mask...")
     
     mask_dense = np.stack(mask_dense, axis=-1)
     mask_breast = np.stack(mask_breast, axis=-1)
     
-    if np.sum(mask_breast[:,0:10,0]) != 0:
+    dcmH = pydicom.dcmread(str(dcmFiles[0]))
+    
+    if dcmH.ImageLaterality:
         
-        flag_right_breast = False
+        if dcmH.ImageLaterality == 'R':
+            flags['right_breast'] = True
+        elif dcmH.ImageLaterality == 'L':
+            flags['right_breast'] = False
+    else:
+    
+        if np.sum(mask_breast[:,0:10,0]) != 0:
+            flags['right_breast'] = False
+            
+        else:
+            flags['right_breast'] = True
+            
+    if not flags['right_breast']:
+        
         mask_dense = np.fliplr(mask_dense)
         mask_breast = np.fliplr(mask_breast)
         
-    else:
+        mask_dense = np.flip(mask_dense, axis=-1)
+        mask_breast = np.flip(mask_breast, axis=-1)
         
-        flag_right_breast = True
+        
+       
+    flags['compression_paddle_found'] = False 
     
-    # Crop
-    # mask_dense = mask_dense[:,1500:,:]
-    # mask_breast = mask_breast[:,1500:,:]
+    if flags['fix_compression_paddle']:  
+        
+        g = np.array(((0 ,-1, 0),
+                      (-1, 4,-1),
+                      (0 ,-1, 0)))
+    
+        edges = cv2.filter2D(mask_breast[:,:,0], -1, g)
+            
+        lines = cv2.HoughLines(edges,1,np.pi/90,300)
+        
+        if lines is not None:
+            n_halfpi_lines = np.sum([float(x).is_integer() for x in lines[:,0,1] / (np.pi/2)])
+        else:
+            n_halfpi_lines = 0
+        
+        if n_halfpi_lines >= 3:
+            flags['compression_paddle_found'] = True
+            
+        elif n_halfpi_lines >= 1:
+            
+            img = 255* mask_breast[:,:,0]
+            img = np.tile(np.expand_dims(img, axis=-1), (1,1,3))
+            for line in lines:
+                rho,theta = line[0]
+                a = np.cos(theta)
+                b = np.sin(theta)
+                x0 = a*rho
+                y0 = b*rho
+                x1 = int(x0 + 1000*(-b))
+                y1 = int(y0 + 1000*(a))
+                x2 = int(x0 - 1000*(-b))
+                y2 = int(y0 - 1000*(a))
+                cv2.line(img,(x1,y1),(x2,y2),(0,0,255),2)
+            plt.imshow(img)   
+    
+    
     
     # Mask erosion to avoid regions too close to the skin, chest-wall and
     # pectoral muscle
@@ -414,7 +470,7 @@ def process_dense_mask(mask_dense, mask_breast, cluster_size, flag_print=True):
     # Map of possible positions
     final_mask = mask_breast * mask_dense
     
-    return final_mask, flag_right_breast
+    return final_mask, flags
 
 #-----------------------------------------------------------------------------#
 #                                                                             #
