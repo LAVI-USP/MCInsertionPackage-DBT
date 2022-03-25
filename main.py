@@ -25,7 +25,8 @@ sys.path.insert(1, '/home/rodrigo/Documents/rodrigo/codes/pyDBT')
 
 from libs.utilities import makedir, filesep, writeDicom
 from libs.methods import get_XYZ_calc_positions, get_breast_masks, process_dense_mask, \
-    get_calc_cluster, get_XYZ_cluster_positions, get_projection_cluster_mask
+    get_calc_cluster, get_XYZ_cluster_positions, get_projection_cluster_mask, \
+    apply_mtf_mask_projs
 
 #%%
 
@@ -46,7 +47,7 @@ if __name__ == '__main__':
     pathLibra                   = 'LIBRA-1.0.4'
     pathAuxLibs                 = 'libs'
     pathBuildDirpyDBT           = '/home/rodrigo/Documents/rodrigo/codes/pyDBT/build'
-    pathMTF                     = 'data/mtf_kernel_ffdm_pristina_fourier.npy'
+    pathMTF                     = 'data/mtf_function_ffdm_pristina_fourier.npy'
     pathPatientDensity          = pathPatientCases + '/density'
     pathPatientCalcs            = pathPatientCases + '/calcifications'
     
@@ -61,7 +62,7 @@ if __name__ == '__main__':
     cluster_size = [int(x/cluster_pixel_size) for x in cluster_dimensions]
     calc_window  = [int(x/cluster_pixel_size) for x in calc_dimensions]
      
-    contrasts = [0.2]
+    contrasts = [0.35, 0.25]
     # for x in range(14):
     #     contrasts.append(0.85 * contrasts[x])
     
@@ -129,6 +130,10 @@ if __name__ == '__main__':
             # Inserting cluster at position and projecting the cluster mask
             projs_masks = get_projection_cluster_mask(roi_3D, geo, x_clust, y_clust, z_clust, cluster_pixel_size, libFiles, flags)
             
+            # Apply the fitted MTF on the mask projections
+            projs_masks_mtf = apply_mtf_mask_projs(projs_masks, len(dcmFiles), pathMTF, flags)
+            
+            
             cropCoords_file = pathlib.Path('{}{}{}{}Result_Images{}cropCoords.npy'.format(pathPatientDensity , filesep(), "/".join(exam.split('/')[-3:]), filesep(), filesep()))
             if cropCoords_file.is_file():
                 cropCoords = np.load(str(cropCoords_file))
@@ -157,7 +162,7 @@ if __name__ == '__main__':
                     
                     ind = int(str(dcmFile).split('/')[-1].split('_')[1]) - 1
 
-                    tmp_mask = np.abs(projs_masks[:,:,ind])
+                    tmp_mask = np.abs(projs_masks_mtf[:,:,ind])
                     tmp_mask = (tmp_mask - tmp_mask.min()) / (tmp_mask.max() - tmp_mask.min())
                     tmp_mask[tmp_mask > 0] *= contrast
                     tmp_mask = 1 - tmp_mask

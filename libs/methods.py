@@ -65,7 +65,7 @@ def get_projection_cluster_mask(roi_3D, geo, x_clust, y_clust, z_clust, cluster_
     # Project this volume
     projs_masks = projectionDD(np.float64(vol), geo, -1, libFiles)
     
-    if not flags['right_breast']:
+    if flags['flip_projection_angle']:
         projs_masks = np.flip(projs_masks, axis=-1)
     
     return projs_masks
@@ -87,7 +87,7 @@ def get_XYZ_cluster_positions(final_mask, bdyThick, buildDir, flags):
     geo.GE()
     
     # Find the X boundary
-    bound_X = int(np.where(np.sum(final_mask[:,:,0], axis=0) > 1)[0][0]) - 10
+    bound_X = int(np.where(np.sum(final_mask[:,:,4], axis=0) > 1)[0][0]) - 30
     
     # Crop to save reconstruction time
     final_mask = final_mask[:,bound_X:,:]
@@ -105,7 +105,7 @@ def get_XYZ_cluster_positions(final_mask, bdyThick, buildDir, flags):
     vol[:,:,:(geo.nz//4)] = 0
             
     # Ramdomly selects one of the possible points
-    i,j,k = np.where(vol>0.5)
+    i,j,k = np.where(vol>0.58)
     randInt = np.random.randint(0,i.shape[0])
     y_pos, x_pos, z_pos = (i[randInt],j[randInt],k[randInt])
     
@@ -252,7 +252,8 @@ def get_calc_cluster(pathCalcifications, pathCalcificationsReport, number_calc, 
         # Reshape it 
         calc_3D = calc_3D.reshape(calc_size)
         
-        calc_3D = contrast * (calc_3D / calc_3D.max())
+        # Normalize by the sum of pixels equal to 1 on a 2D vertical projection
+        calc_3D = (contrast / (np.sum(calc_3D, axis=-1).max()/255)) * (calc_3D / calc_3D.max())
         
         roi_3D[x_calc[idX]-(calc_3D.shape[0]//2):x_calc[idX]-(calc_3D.shape[0]//2)+calc_3D.shape[0],
                y_calc[idX]-(calc_3D.shape[1]//2):y_calc[idX]-(calc_3D.shape[1]//2)+calc_3D.shape[1],
@@ -376,7 +377,9 @@ def process_dense_mask(mask_dense, mask_breast, cluster_size, dcmFiles, flags):
     mask_dense = np.stack(mask_dense, axis=-1)
     mask_breast = np.stack(mask_breast, axis=-1)
     
-    dcmH = pydicom.dcmread(str(dcmFiles[0]))
+    indDcm = [idx for idx, dcmFile in enumerate(dcmFiles) if int(str(dcmFile).split('/')[-1].split('_')[1]) == 1][0]
+    
+    dcmH = pydicom.dcmread(str(dcmFiles[indDcm]))
     
     if dcmH.ImageLaterality:
         
@@ -396,14 +399,26 @@ def process_dense_mask(mask_dense, mask_breast, cluster_size, dcmFiles, flags):
         
         mask_dense = np.fliplr(mask_dense)
         mask_breast = np.fliplr(mask_breast)
+     
+    flags['flip_projection_angle'] = False
+    # Some projections start from positive DetectorSecondaryAngle, so we flip them 
+    if dcmH.DetectorSecondaryAngle > 0:
         
+        if not flags['right_breast']:
+            flags['flip_projection_angle'] = True
+         
+    else:
+        if flags['right_breast']:
+            flags['flip_projection_angle'] = True
+        
+        
+    if flags['flip_projection_angle']:
         mask_dense = np.flip(mask_dense, axis=-1)
         mask_breast = np.flip(mask_breast, axis=-1)
         
         
        
     flags['compression_paddle_found'] = False 
-    
     if flags['fix_compression_paddle']:  
         
         g = np.array(((0 ,-1, 0),
@@ -444,11 +459,11 @@ def process_dense_mask(mask_dense, mask_breast, cluster_size, dcmFiles, flags):
     # Mask erosion to avoid regions too close to the skin, chest-wall and
     # pectoral muscle
     mask_breast[:,-1,:] = 0
-    mask_breast[:,0,:] = 0
+    mask_breast[:,0,:] = 0    
     
     # Element for erosion
     element = cv2.getStructuringElement(shape=cv2.MORPH_ELLIPSE, ksize=(cluster_size[0]//2,cluster_size[1]//2))
-    
+        
     # Element to removes isolated pixels
     element1 = cv2.getStructuringElement(cv2.MORPH_RECT, (31,31))
     element2 = cv2.getStructuringElement(cv2.MORPH_RECT, (30,30))
@@ -463,6 +478,7 @@ def process_dense_mask(mask_dense, mask_breast, cluster_size, dcmFiles, flags):
         # Removes isolated pixels
         clean_dense_mask = cv2.morphologyEx(mask_dense[:,:,z], cv2.MORPH_CLOSE, element1)
         clean_dense_mask = cv2.morphologyEx(clean_dense_mask, cv2.MORPH_OPEN, element2)
+        clean_dense_mask = cv2.erode(clean_dense_mask, element2)
     
         mask_dense[:,:,z] = clean_dense_mask * mask_dense[:,:,z]        
     
@@ -471,6 +487,72 @@ def process_dense_mask(mask_dense, mask_breast, cluster_size, dcmFiles, flags):
     final_mask = mask_breast * mask_dense
     
     return final_mask, flags
+
+#-----------------------------------------------------------------------------#
+#                                                                             #
+#-----------------------------------------------------------------------------#
+
+def apply_mtf_mask_projs(projs_masks, n_projs, pathMTF, flags):
+    
+    if flags['print_debug']:
+        print("Applying MTF on MC masks...")
+      
+    # Load fiited MTF function
+    f = np.load(pathMTF, allow_pickle=True)[()]
+    
+    # A vector of distance (measured in pixels) 
+    x = np.hstack((np.arange(projs_masks.shape[1],-1,-1), np.arange(1,projs_masks.shape[1],1)))
+    y = np.hstack((np.arange(projs_masks.shape[0],-1,-1), np.arange(1,projs_masks.shape[0],1)))
+    
+    xx, yy = np.meshgrid(x, y)
+    
+    # Now find the distance of each element of a square 2D matrix from it's centre
+    ri = np.sqrt(xx**2+yy**2)
+    
+    # Find indexes which are greater than the max distance
+    # 630 is the largest pixel distance from the center of the MTF array. 
+    # Used when function was fitted
+    idx_extra = ri > 630
+    
+    # Truncate to max distance
+    ri[idx_extra] = 630
+    
+    # Evaluate the fitted MTF function on the points
+    mtf_2d = f(ri)
+    
+    mtf_2d = np.fft.ifftshift(mtf_2d)
+    
+    projs_masks_mtf = np.empty_like(projs_masks)
+    
+    pad_i = projs_masks.shape[0] 
+    pad_j = projs_masks.shape[1] 
+    
+    for z in range(n_projs):                    
+        
+        # Pad projection space domain
+        projs_mask_pad = np.pad(projs_masks[:,:,z], ((0,pad_i),(0,pad_j)))
+                               
+        # FFT of pad projection
+        projs_mask_pad_fft = np.fft.fft2(projs_mask_pad) 
+        
+        # Get the modulus (we will use on the multiplication)
+        projs_mask_pad_abs = np.abs(projs_mask_pad_fft)
+        # Get the angle (we will keep the same)
+        projs_mask_pad_angle = np.angle(projs_mask_pad_fft)
+        
+        # Multiplication of modulus
+        projs_mask_pad_abs = projs_mask_pad_abs * mtf_2d
+        
+        # Transform polar to rectangular (modulus * np.exp(1j*angles))
+        projs_mask_pad_fft = projs_mask_pad_abs * np.exp(1j*projs_mask_pad_angle)
+        
+        # iFFT
+        projs_mask_pad = np.real(np.fft.ifft2(projs_mask_pad_fft))
+        
+        # Crop projection
+        projs_masks_mtf[:,:,z] = projs_mask_pad[:pad_i, :pad_j] 
+    
+    return projs_masks_mtf
 
 #-----------------------------------------------------------------------------#
 #                                                                             #
