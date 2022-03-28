@@ -138,9 +138,14 @@ if __name__ == '__main__':
             if cropCoords_file.is_file():
                 cropCoords = np.load(str(cropCoords_file))
                 flags['mask_crop'] = True
+                flags['cropCoords'] = cropCoords
             else:
                 flags['mask_crop'] = False
+                
+                
+            flags['calc_coords'] = (x_clust, y_clust, z_clust)
             
+            np.save(path2write_patient_name + '{}flags'.format(filesep()), flags)
 
             for contrast in contrasts:
             
@@ -148,7 +153,7 @@ if __name__ == '__main__':
                 
                 makedir(path2write_contrast)
                 
-                for idX, dcmFile in enumerate(dcmFiles):
+                for dcmFile in dcmFiles:
                     
                     dcmH = pydicom.dcmread(str(dcmFile))
                     
@@ -172,7 +177,7 @@ if __name__ == '__main__':
                     if not flags['right_breast']:
                         dcmData = np.fliplr(dcmData)
                                                 
-                    dcmFile_tmp = path2write_contrast + '{}{}'.format(filesep(), dcmFiles[idX].split('/')[-1])
+                    dcmFile_tmp = path2write_contrast + '{}{}'.format(filesep(), dcmFile.split('/')[-1])
                     
                     writeDicom(dcmFile_tmp, np.uint16(dcmData))
  
