@@ -105,7 +105,7 @@ def get_XYZ_cluster_positions(final_mask, bdyThick, buildDir, flags):
     vol[:,:,:(geo.nz//4)] = 0
             
     # Ramdomly selects one of the possible points
-    i,j,k = np.where(vol>0.58)
+    i,j,k = np.where(vol>0.5)
     randInt = np.random.randint(0,i.shape[0])
     y_pos, x_pos, z_pos = (i[randInt],j[randInt],k[randInt])
     

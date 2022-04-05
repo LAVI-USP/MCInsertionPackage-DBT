@@ -76,7 +76,15 @@ if __name__ == '__main__':
         
         exams = [str(item) for item in pathlib.Path(patient_case, 'DBT').glob("*") if pathlib.Path(item).is_dir() and 'density' not in str(item) and 'calcifications' not in str(item)]
         
-        for exam in exams:                       
+        for exam in exams:  
+
+            path2write_patient_name = "{}{}{}".format(pathPatientCalcs , filesep(), "/".join(exam.split('/')[-3:]))
+            
+            # Case already processed
+            if makedir(path2write_patient_name):
+                continue  
+
+            print("Processing " + path2write_patient_name)                   
         
             #%%     
             
@@ -111,10 +119,6 @@ if __name__ == '__main__':
             del final_mask
             
             #%% 
-                        
-            path2write_patient_name = "{}{}{}".format(pathPatientCalcs , filesep(), "/".join(exam.split('/')[-3:]))
-            
-            makedir(path2write_patient_name)
             
             cluster_2D = np.mean(roi_3D, axis=-1)
             cluster_2D = 255*(cluster_2D - cluster_2D.min())/(cluster_2D.max() - cluster_2D.min())
