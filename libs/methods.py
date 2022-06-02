@@ -233,13 +233,13 @@ def get_calc_cluster(pathCalcifications, pathCalcificationsReport, number_calc, 
     for idX, contrast in enumerate(contrasts_local):
         
         
-        calc_size = (df.iloc[rand_index[idX]]['BB_CountY'], 
-                     df.iloc[rand_index[idX]]['BB_CountX'], 
-                     df.iloc[rand_index[idX]]['BB_CountZ'])
-        
-        calc_name = df.iloc[rand_index[idX]]['FileName'] + '_{}x{}x{}'.format(calc_size[1],
-                                                                              calc_size[0],
-                                                                              calc_size[2])
+        calc_size = (df.iloc[rand_index[idX]]['BB_CountZ'], 
+                     df.iloc[rand_index[idX]]['BB_CountY'], 
+                     df.iloc[rand_index[idX]]['BB_CountX'])
+    
+        calc_name = df.iloc[rand_index[idX]]['FileName'] + '_{}x{}x{}'.format(calc_size[2],
+                                                                              calc_size[1],
+                                                                              calc_size[0])
         
         # Extract zip in tmp folder
         zip_ref =  zipfile.ZipFile("{}/{}.zip".format(pathCalcifications,
@@ -251,6 +251,9 @@ def get_calc_cluster(pathCalcifications, pathCalcificationsReport, number_calc, 
         
         # Reshape it 
         calc_3D = calc_3D.reshape(calc_size)
+        
+        # Fix dimensions (slice on last)
+        calc_3D = np.transpose(calc_3D, (1, 2, 0))
         
         # Normalize by the sum of pixels equal to 1 on a 2D vertical projection
         calc_3D = (contrast / (np.sum(calc_3D, axis=-1).max()/255)) * (calc_3D / calc_3D.max())
