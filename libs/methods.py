@@ -65,6 +65,8 @@ def get_projection_cluster_mask(roi_3D, geo, x_clust, y_clust, z_clust, cluster_
     # Project this volume
     projs_masks = projectionDD(np.float64(vol), geo, -1, libFiles)
     
+    projs_masks /= projs_masks.max()
+    
     if flags['flip_projection_angle']:
         projs_masks = np.flip(projs_masks, axis=-1)
     
@@ -524,6 +526,12 @@ def apply_mtf_mask_projs(projs_masks, n_projs, pathMTF, flags):
     mtf_2d = f(ri)
     
     mtf_2d = np.fft.ifftshift(mtf_2d)
+    
+    mtf_2d = np.real(np.fft.ifft2(mtf_2d))
+    
+    mtf_2d = mtf_2d / np.sqrt(np.sum(mtf_2d**2))
+    
+    mtf_2d = np.abs(np.fft.fft2(mtf_2d))
     
     projs_masks_mtf = np.empty_like(projs_masks)
     

@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 from scipy.io import loadmat
 
 sys.path.insert(1, '../')
-sys.path.insert(1, '/home/rodrigo/Documents/rodrigo/codes/pyDBT')
+sys.path.insert(1, '/home/rodrigo/Documents/Rodrigo/Codigos/pyDBT')
 
 from libs.utilities import makedir, filesep, writeDicom
 
@@ -28,8 +28,8 @@ from pydbt.functions.initialConfig import initialConfig
 
 if __name__ == '__main__':
     
-    pathPatientCases            = '/home/rodrigo/Downloads/mc_insert'
-    pathBuildDirpyDBT           = '/home/rodrigo/Documents/rodrigo/codes/pyDBT/build'
+    pathPatientCases            = '/media/rodrigo/Dados_2TB/Imagens/HC_Barretos/mc_insert'
+    pathBuildDirpyDBT           = '/home/rodrigo/Documents/Rodrigo/Codigos/pyDBT/build'
     pathPatientDensity          = pathPatientCases + '/density'
     pathPatientCalcs            = pathPatientCases + '/calcifications'
     

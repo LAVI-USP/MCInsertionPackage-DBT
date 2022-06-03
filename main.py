@@ -21,7 +21,7 @@ import pydicom
 import pathlib
 import matplotlib.pyplot as plt
 
-sys.path.insert(1, '/home/rodrigo/Documents/rodrigo/codes/pyDBT')
+sys.path.insert(1, '/home/rodrigo/Documents/Rodrigo/Codigos/pyDBT')
 
 from libs.utilities import makedir, filesep, writeDicom
 from libs.methods import get_XYZ_calc_positions, get_breast_masks, process_dense_mask, \
@@ -40,13 +40,13 @@ if __name__ == '__main__':
     cluster_pixel_size = 0.05               # In mm
     
     
-    pathPatientCases            = '/home/rodrigo/Downloads/mc_insert'
-    pathCalcifications          = '/media/rodrigo/Data/images/UPenn/Phantom/VCT/db_calcium/calc'
-    pathCalcificationsReport    = '/media/rodrigo/Data/images/UPenn/Phantom/VCT/db_calcium/report.xlsx'
-    pathMatlab                  = '/usr/local/R2019a/bin/matlab'
+    pathPatientCases            = '/media/rodrigo/Dados_2TB/Imagens/HC_Barretos/mc_insert'
+    pathCalcifications          = '/media/rodrigo/Dados_2TB/Imagens/UPenn/Phantom/VCT/db_calcium/calc'
+    pathCalcificationsReport    = '/media/rodrigo/Dados_2TB/Imagens/UPenn/Phantom/VCT/db_calcium/report.xlsx'
+    pathMatlab                  = '/usr/local/MATLAB/R2019a/bin/matlab'
     pathLibra                   = 'LIBRA-1.0.4'
     pathAuxLibs                 = 'libs'
-    pathBuildDirpyDBT           = '/home/rodrigo/Documents/rodrigo/codes/pyDBT/build'
+    pathBuildDirpyDBT           = '/home/rodrigo/Documents/Rodrigo/Codigos/pyDBT/build'
     pathMTF                     = 'data/mtf_function_ffdm_pristina_fourier.npy'
     pathPatientDensity          = pathPatientCases + '/density'
     pathPatientCalcs            = pathPatientCases + '/calcifications'
@@ -81,8 +81,8 @@ if __name__ == '__main__':
             path2write_patient_name = "{}{}{}".format(pathPatientCalcs , filesep(), "/".join(exam.split('/')[-3:]))
             
             # Case already processed
-            if makedir(path2write_patient_name):
-                continue  
+            # if makedir(path2write_patient_name):
+            #     continue  
 
             print("Processing " + path2write_patient_name)                   
         
