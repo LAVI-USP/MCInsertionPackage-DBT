@@ -28,7 +28,7 @@ from pydbt.functions.initialConfig import initialConfig
 #                                                                             #
 #-----------------------------------------------------------------------------#
 
-def get_projection_cluster_mask(roi_3D, geo, x_clust, y_clust, z_clust, cluster_pixel_size, libFiles, flags):
+def get_projection_cluster_mask(roi_3D, contrasts_individual, geo, x_clust, y_clust, z_clust, cluster_pixel_size, libFiles, flags):
     
     """
     Here, we are recreating the volume but now with higher resolution on
@@ -56,16 +56,28 @@ def get_projection_cluster_mask(roi_3D, geo, x_clust, y_clust, z_clust, cluster_
     
     geo.DAG += vol_z_offset
     
-    # Create a empty volume specific for that part (calcification cluster)
-    vol = np.zeros((geo.ny, geo.nx, geo.nz))
     
-    # Load the cluster on this volume. Note that Z has the same size
-    vol = roi_3D
+    projs_masks = np.zeros((geo.nv, geo.nu, geo.nProj))
     
-    # Project this volume
-    projs_masks = projectionDD(np.float64(vol), geo, -1, libFiles)
     
+    for idX, contrast_individual in enumerate(contrasts_individual):
+        
+        # Create a empty volume specific for that part (calcification cluster)
+        vol = np.zeros((geo.ny, geo.nx, geo.nz))
+        
+        # Load the cluster on this volume. Note that Z has the same size
+        vol = roi_3D[..., idX]
+        
+        # Project this volume
+        projs_masks_tmp = projectionDD(np.float64(vol), geo, -1, libFiles)
+        
+        projs_masks_tmp = (projs_masks_tmp / projs_masks_tmp.max()) * contrast_individual
+        
+        projs_masks += projs_masks_tmp
+        
+        
     projs_masks /= projs_masks.max()
+    
     
     if flags['flip_projection_angle']:
         projs_masks = np.flip(projs_masks, axis=-1)
@@ -228,6 +240,8 @@ def get_calc_cluster(pathCalcifications, pathCalcificationsReport, number_calc, 
          
     rand_index = np.random.randint(0, df.shape[0], number_calc)
     
+    cluster_size = np.hstack((cluster_size,np.array(number_calc)))
+    
     roi_3D = np.zeros(cluster_size)
     
     contrasts_local = np.hstack((1, np.linspace(0.5,1,100,endpoint=False)[np.random.randint(0,99,number_calc-1)]))
@@ -262,9 +276,9 @@ def get_calc_cluster(pathCalcifications, pathCalcificationsReport, number_calc, 
         
         roi_3D[x_calc[idX]-(calc_3D.shape[0]//2):x_calc[idX]-(calc_3D.shape[0]//2)+calc_3D.shape[0],
                y_calc[idX]-(calc_3D.shape[1]//2):y_calc[idX]-(calc_3D.shape[1]//2)+calc_3D.shape[1],
-               z_calc[idX]-(calc_3D.shape[2]//2):z_calc[idX]-(calc_3D.shape[2]//2)+calc_3D.shape[2]] +=  calc_3D
+               z_calc[idX]-(calc_3D.shape[2]//2):z_calc[idX]-(calc_3D.shape[2]//2)+calc_3D.shape[2], idX] =  calc_3D
     
-    return roi_3D
+    return roi_3D, contrasts_local
 
 #-----------------------------------------------------------------------------#
 #                                                                             #
@@ -497,7 +511,7 @@ def process_dense_mask(mask_dense, mask_breast, cluster_size, dcmFiles, flags):
 #                                                                             #
 #-----------------------------------------------------------------------------#
 
-def apply_mtf_mask_projs(projs_masks, n_projs, pathMTF, flags):
+def apply_mtf_mask_projs(projs_masks, n_projs, detector_size, pathMTF, flags):
     
     if flags['print_debug']:
         print("Applying MTF on MC masks...")
@@ -505,33 +519,47 @@ def apply_mtf_mask_projs(projs_masks, n_projs, pathMTF, flags):
     # Load fiited MTF function
     f = np.load(pathMTF, allow_pickle=True)[()]
     
-    # A vector of distance (measured in pixels) 
-    x = np.hstack((np.arange(projs_masks.shape[1],-1,-1), np.arange(1,projs_masks.shape[1],1)))
-    y = np.hstack((np.arange(projs_masks.shape[0],-1,-1), np.arange(1,projs_masks.shape[0],1)))
+    nyquist = 1/(2*detector_size)
     
+     
+    # A vector of distance (measured in pixels) 
+    x = np.linspace(nyquist, 0, projs_masks.shape[1]+1)
+    
+    if projs_masks.shape[1] % 2 == 0:
+        x = np.hstack((x, x[1:-1][-1::-1]))
+    else:
+        x = np.hstack((x, x[0:-1][-1::-1]))
+    
+    
+    y = np.linspace(nyquist, 0, projs_masks.shape[0]+1)
+    
+    if projs_masks.shape[0] % 2 == 0:
+        y = np.hstack((y, y[1:-1][-1::-1]))
+    else:
+        y = np.hstack((y, y[0:-1][-1::-1]))
+    
+
     xx, yy = np.meshgrid(x, y)
     
     # Now find the distance of each element of a square 2D matrix from it's centre
     ri = np.sqrt(xx**2+yy**2)
     
-    # Find indexes which are greater than the max distance
-    # 630 is the largest pixel distance from the center of the MTF array. 
-    # Used when function was fitted
-    idx_extra = ri > 630
+    # Find indexes which are greater than nyquist
+    idx_extra = ri > nyquist
     
-    # Truncate to max distance
-    ri[idx_extra] = 630
+    # Truncate to max freq
+    ri[idx_extra] = nyquist
     
     # Evaluate the fitted MTF function on the points
     mtf_2d = f(ri)
     
     mtf_2d = np.fft.ifftshift(mtf_2d)
     
-    mtf_2d = np.real(np.fft.ifft2(mtf_2d))
+    # mtf_2d = np.real(np.fft.ifft2(mtf_2d))
     
-    mtf_2d = mtf_2d / np.sqrt(np.sum(mtf_2d**2))
+    # mtf_2d = mtf_2d / np.sqrt(np.sum(mtf_2d**2))
     
-    mtf_2d = np.abs(np.fft.fft2(mtf_2d))
+    # mtf_2d = np.abs(np.fft.fft2(mtf_2d))
     
     projs_masks_mtf = np.empty_like(projs_masks)
     

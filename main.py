@@ -38,6 +38,7 @@ if __name__ == '__main__':
     calc_dimensions     = (5.6,5.6,5.6)     # In mm
     
     cluster_pixel_size = 0.05               # In mm
+    detector_size = 0.1                     # In mm
     
     
     pathPatientCases            = '/media/rodrigo/Dados_2TB/Imagens/HC_Barretos/mc_insert'
@@ -81,8 +82,8 @@ if __name__ == '__main__':
             path2write_patient_name = "{}{}{}".format(pathPatientCalcs , filesep(), "/".join(exam.split('/')[-3:]))
             
             # Case already processed
-            # if makedir(path2write_patient_name):
-            #     continue  
+            if makedir(path2write_patient_name):
+                continue  
 
             print("Processing " + path2write_patient_name)                   
         
@@ -92,7 +93,7 @@ if __name__ == '__main__':
             (x_calc, y_calc, z_calc), _ = get_XYZ_calc_positions(number_calc, cluster_size, calc_window, flags)
             
             # Load each calcification and put them on specified position
-            roi_3D = get_calc_cluster(pathCalcifications, pathCalcificationsReport, number_calc, cluster_size, x_calc, y_calc, z_calc, flags)
+            roi_3D, contrasts_individual = get_calc_cluster(pathCalcifications, pathCalcificationsReport, number_calc, cluster_size, x_calc, y_calc, z_calc, flags)
             
     
             #%%
@@ -120,7 +121,7 @@ if __name__ == '__main__':
             
             #%% 
             
-            cluster_2D = np.mean(roi_3D, axis=-1)
+            cluster_2D = np.sum(np.sum(roi_3D, axis=-1), axis=-1)
             cluster_2D = 255*(cluster_2D - cluster_2D.min())/(cluster_2D.max() - cluster_2D.min())
             
             if flags['right_breast']:
@@ -132,10 +133,10 @@ if __name__ == '__main__':
             plt.imsave("{}{}cluster_{}x_{}y_{}z.png".format(path2write_patient_name, filesep(), x_clust2save, y_clust, z_clust), cluster_2D, cmap='gray')
             
             # Inserting cluster at position and projecting the cluster mask
-            projs_masks = get_projection_cluster_mask(roi_3D, geo, x_clust, y_clust, z_clust, cluster_pixel_size, libFiles, flags)
+            projs_masks = get_projection_cluster_mask(roi_3D, contrasts_individual, geo, x_clust, y_clust, z_clust, cluster_pixel_size, libFiles, flags)
             
             # Apply the fitted MTF on the mask projections
-            projs_masks_mtf = apply_mtf_mask_projs(projs_masks, len(dcmFiles), pathMTF, flags)
+            projs_masks_mtf = apply_mtf_mask_projs(projs_masks, len(dcmFiles), detector_size, pathMTF, flags)
             
             
             cropCoords_file = pathlib.Path('{}{}{}{}Result_Images{}cropCoords.npy'.format(pathPatientDensity , filesep(), "/".join(exam.split('/')[-3:]), filesep(), filesep()))
