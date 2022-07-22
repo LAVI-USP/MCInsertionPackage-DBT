@@ -22,6 +22,7 @@ from libs.utilities import makedir, filesep, writeDicom
 from pydbt.functions.projection_operators import backprojectionDDb_cuda
 from pydbt.parameters.parameterSettings import geometry_settings
 from pydbt.functions.initialConfig import initialConfig
+from pydbt.functions.dataPreProcess import dataPreProcess
 
 
 #%%
@@ -33,11 +34,14 @@ if __name__ == '__main__':
     pathPatientDensity          = pathPatientCases + '/density'
     pathPatientCalcs            = pathPatientCases + '/calcifications'
     
-    contrasts = [0.35, 0.25]
+    cluster_dimensions  = (20, 20, 20)              # In mm
+    
+    contrasts = [0.3]
     
     # List all patients    
-    patient_cases = [str(item) for item in pathlib.Path(pathPatientCases).glob("*") if pathlib.Path(item).is_dir()]
+    patient_cases = [str(item) for item in pathlib.Path(pathPatientCalcs).glob("*") if pathlib.Path(item).is_dir()]
     
+        
     # Call function for initial configurations
     libFiles = initialConfig(buildDir=pathBuildDirpyDBT, createOutFolder=False)
     
@@ -47,7 +51,7 @@ if __name__ == '__main__':
     
     for patient_case in patient_cases:
         
-        exams = [str(item) for item in pathlib.Path(patient_case, 'DBT').glob("*") if pathlib.Path(item).is_dir() and 'density' not in str(item) and 'calcifications' not in str(item)]
+        exams = [str(item) for item in pathlib.Path(patient_case, 'DBT').glob("*") if pathlib.Path(item).is_dir()]
         
         for exam in exams: 
             
@@ -66,10 +70,14 @@ if __name__ == '__main__':
             if not flags['right_breast']:
                 mask_breast = np.fliplr(mask_breast)
 
-            bound_X = int(np.where(np.sum(mask_breast, axis=0) > 1)[0][0]) - 30
+            bound_X = np.max((int(np.where(np.sum(mask_breast, axis=0) > 1)[0][0]) - 30, 0))
 
             for contrast in contrasts:
                 
+                path2write_contrast = "{}{}recon_contrast_{:.3f}_ROI".format(path2write_patient_name , filesep(), contrast)
+                
+                if makedir(path2write_contrast):
+                    continue  
                 
                 path2write_contrast = "{}{}contrast_{:.3f}".format(path2write_patient_name , filesep(), contrast)
     
@@ -105,20 +113,51 @@ if __name__ == '__main__':
                 geo.nv = dcmData.shape[0]      # number of pixels (rows)
                 geo.nz = np.ceil(bdyThick/geo.dz).astype(int)
                 
+                dcmData = dataPreProcess(dcmData, geo,  flagCropProj=False)
+                
                 vol = backprojectionDDb_cuda(np.float64(dcmData), geo, -1, libFiles)
                 
+                vol[vol < 0 ] = 0
+                
+                vol = (vol / vol.max()) * (2**12-1)
+                
                 vol = np.uint16(vol)
-                
-                # plt.imshow(vol[:,:,flags['calc_coords'][-1]], 'gray')
-                
-                path2write_contrast = "{}{}recon_contrast_{:.3f}".format(path2write_patient_name , filesep(), contrast)
-                
-                makedir(path2write_contrast)
-                
-                for z in range(vol.shape[-1]):
                     
-                    dcmFile_tmp = path2write_contrast + '{}{}.dcm'.format(filesep(), z)
+                
+                # The cluster origin is located at the same as the DBT systemes, i.e., right midle. Z is at the half
+                cluster_pixel_size = int(20/0.1)
+                
+                ind_x = ((flags['calc_coords'][0] + flags['bound_X']) - bound_X) - cluster_pixel_size
+                ind_y = flags['calc_coords'][1] - (cluster_pixel_size // 2)
+                ind_z = flags['calc_coords'][2]
+                # plt.imshow(vol[ind_y:ind_y+cluster_pixel_size,
+                #                 ind_x:ind_x+cluster_pixel_size,
+                #                 flags['calc_coords'][2]], 'gray')
+                
+                path2write_contrast = "{}{}recon_contrast_{:.3f}_ROI".format(path2write_patient_name , filesep(), contrast)
+                
+                for z in range(-7,8):
                     
-                    writeDicom(dcmFile_tmp, np.uint16(vol[:,:,z]))
+                    dcmFile_tmp = path2write_contrast + '{}{}.dcm'.format(filesep(), ind_z + z)
+                    
+                    writeDicom(dcmFile_tmp, np.uint16(vol[ind_y:ind_y+cluster_pixel_size, 
+                                                          ind_x:ind_x+cluster_pixel_size,
+                                                          ind_z + z]))
+                    
+                # if not flags['right_breast']:
+                #     vol = np.fliplr(vol)
+                    
+                
+                # path2write_contrast = "{}{}recon_contrast_{:.3f}".format(path2write_patient_name , filesep(), contrast)
+                
+                # makedir(path2write_contrast)
+                
+                # for z in range(vol.shape[-1]):
+                    
+                #     dcmFile_tmp = path2write_contrast + '{}{}.dcm'.format(filesep(), z)
+                    
+                #     writeDicom(dcmFile_tmp, np.uint16(vol[:,:,z]))
+                    
+                    
                 
                 
