@@ -32,13 +32,11 @@ from libs.methods import get_XYZ_calc_positions, get_breast_masks, process_dense
 
 if __name__ == '__main__':
     
-    number_calc = 8
+    cluster_dimensions  = (20, 20, 10)              # In mm
+    calc_dimensions     = (8, 8, 8)                 # In mm
     
-    cluster_dimensions  = (14,14,14)        # In mm
-    calc_dimensions     = (5.6,5.6,5.6)     # In mm
-    
-    cluster_pixel_size = 0.05               # In mm
-    detector_size = 0.1                     # In mm
+    cluster_pixel_size = 0.048                      # In mm
+    detector_size = 0.1                             # In mm
     
     
     pathPatientCases            = '/media/rodrigo/Dados_2TB/Imagens/HC_Barretos/mc_insert'
@@ -63,7 +61,7 @@ if __name__ == '__main__':
     cluster_size = [int(x/cluster_pixel_size) for x in cluster_dimensions]
     calc_window  = [int(x/cluster_pixel_size) for x in calc_dimensions]
      
-    contrasts = [0.35, 0.25]
+    contrasts = [0.3]
     # for x in range(14):
     #     contrasts.append(0.85 * contrasts[x])
     
@@ -77,7 +75,9 @@ if __name__ == '__main__':
         
         exams = [str(item) for item in pathlib.Path(patient_case, 'DBT').glob("*") if pathlib.Path(item).is_dir() and 'density' not in str(item) and 'calcifications' not in str(item)]
         
-        for exam in exams:  
+        for exam in exams: 
+            
+            number_calc = np.random.randint(1, 7)
 
             path2write_patient_name = "{}{}{}".format(pathPatientCalcs , filesep(), "/".join(exam.split('/')[-3:]))
             
@@ -149,6 +149,7 @@ if __name__ == '__main__':
                 
                 
             flags['calc_coords'] = (x_clust, y_clust, z_clust)
+            flags['bound_X'] = bound_X
             
             np.save(path2write_patient_name + '{}flags'.format(filesep()), flags)
 

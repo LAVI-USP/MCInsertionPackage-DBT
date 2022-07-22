@@ -60,6 +60,7 @@ def get_projection_cluster_mask(roi_3D, contrasts_individual, geo, x_clust, y_cl
     projs_masks = np.zeros((geo.nv, geo.nu, geo.nProj))
     
     
+    calc_out = 0
     for idX, contrast_individual in enumerate(contrasts_individual):
         
         # Create a empty volume specific for that part (calcification cluster)
@@ -71,9 +72,13 @@ def get_projection_cluster_mask(roi_3D, contrasts_individual, geo, x_clust, y_cl
         # Project this volume
         projs_masks_tmp = projectionDD(np.float64(vol), geo, -1, libFiles)
         
-        projs_masks_tmp = (projs_masks_tmp / projs_masks_tmp.max()) * contrast_individual
+        if projs_masks_tmp.max() != 0:
+            projs_masks_tmp = (projs_masks_tmp / projs_masks_tmp.max()) * contrast_individual
         
-        projs_masks += projs_masks_tmp
+            projs_masks += projs_masks_tmp
+        else:
+            print("Calc {}/{} skipped".format(idX+1, len(contrasts_individual)))
+            calc_out += 1
         
         
     projs_masks /= projs_masks.max()
@@ -139,10 +144,10 @@ def get_XYZ_calc_positions(number_calc, cluster_size, calc_window, flags):
     z_pos = number_calc * [None]
     cluster_PDF_history = number_calc * [None]
         
-    microcalc_PDF = gauss3D(calc_window, stdev=10)
+    microcalc_PDF = gauss3D(calc_window, stdev=60)
     microcalc_PDF = 1 - ((microcalc_PDF - microcalc_PDF.min()) / (microcalc_PDF.max() - microcalc_PDF.min()))
     
-    cluster_PDF = gauss3D(cluster_size, stdev=30)
+    cluster_PDF = gauss3D(cluster_size, stdev=100)
         
     for calc_n in range(number_calc):
         
@@ -236,7 +241,7 @@ def get_calc_cluster(pathCalcifications, pathCalcificationsReport, number_calc, 
     df = pd.read_excel(pathCalcificationsReport)
     
     df = df[df['Type'] == 'calc']
-    df = df[df['BB_CountZ'] <= 10]
+    df = df[df['BB_CountZ'] >= 20]
          
     rand_index = np.random.randint(0, df.shape[0], number_calc)
     
@@ -524,20 +529,10 @@ def apply_mtf_mask_projs(projs_masks, n_projs, detector_size, pathMTF, flags):
      
     # A vector of distance (measured in pixels) 
     x = np.linspace(nyquist, 0, projs_masks.shape[1]+1)
-    
-    if projs_masks.shape[1] % 2 == 0:
-        x = np.hstack((x, x[1:-1][-1::-1]))
-    else:
-        x = np.hstack((x, x[0:-1][-1::-1]))
-    
-    
+    x = np.hstack((x, x[1:-1][-1::-1]))
+
     y = np.linspace(nyquist, 0, projs_masks.shape[0]+1)
-    
-    if projs_masks.shape[0] % 2 == 0:
-        y = np.hstack((y, y[1:-1][-1::-1]))
-    else:
-        y = np.hstack((y, y[0:-1][-1::-1]))
-    
+    y = np.hstack((y, y[1:-1][-1::-1]))
 
     xx, yy = np.meshgrid(x, y)
     
