@@ -41,6 +41,17 @@ def removedir(directory):
         else:
             item.unlink()
     directory.rmdir()
+    
+def check_file_exist(file):
+    """
+    Description: Check if file exist.
+    Input:
+        - file (str) =
+    Output:
+        - (int) = 1 if exist / 0 if not
+    Source:
+    """
+    return os.path.isfile(file)
 
 def readDicom(dir2Read):
     """Read dicom folder."""
@@ -69,8 +80,79 @@ def readDicom(dir2Read):
     
     return dcmData, dcmHdr
 
+def writeDecompressedDicom(dcmFileName, dcmImg, dcmHdr):
+    '''
+    
+    Description: Write empty Dicom file
+    
+    Input:
+        - dcmFileName = File name, e.g. "myDicom.dcm".
+        - dcmImg = image np array
+    
+    Output:
+        - 
+            
+    
+    Source:
+    
+    '''
+        
+    dcmImg = dcmImg.astype(np.uint16)
 
-def writeDicom(dcmFileName, dcmImg):
+    # print("Setting file meta information...")
+
+    # Populate required values for file meta information
+    meta = pydicom.dataset.FileMetaDataset() 
+    meta.MediaStorageSOPClassUID = pydicom._storage_sopclass_uids.DigitalMammographyXRayImageStorageForProcessing
+    meta.MediaStorageSOPInstanceUID = pydicom.uid.generate_uid()
+    meta.TransferSyntaxUID = pydicom.uid.ExplicitVRLittleEndian  
+    
+    ds = pydicom.dataset.FileDataset(dcmFileName, {}, file_meta=meta, preamble=b"\0" * 128)
+    
+    ds.is_little_endian = True
+    ds.is_implicit_VR = False
+    
+    ds.SOPClassUID = pydicom._storage_sopclass_uids.DigitalMammographyXRayImageStorageForProcessing
+    ds.PatientName = "x"
+    ds.PatientID = "x"
+    
+    ds.Modality = "DM"
+    ds.SeriesInstanceUID = pydicom.uid.generate_uid()
+    ds.StudyInstanceUID = pydicom.uid.generate_uid()
+    ds.FrameOfReferenceUID = pydicom.uid.generate_uid()
+    
+    ds.BitsStored = 16
+    ds.BitsAllocated = 16
+    ds.SamplesPerPixel = 1
+    ds.HighBit = 16
+    
+    ds.ImagesInAcquisition = "1"
+    
+    ds.Rows = dcmImg.shape[0]
+    ds.Columns = dcmImg.shape[1]
+    
+    ds.ImageLaterality = dcmHdr.ImageLaterality
+    ds.DetectorSecondaryAngle = dcmHdr.DetectorSecondaryAngle
+    ds.BodyPartThickness = dcmHdr.BodyPartThickness
+    ds.InstanceNumber = dcmHdr.InstanceNumber
+    
+    ds.RescaleIntercept = "0"
+    ds.RescaleSlope = "1"
+    ds.PixelSpacing = r"1\1"
+    ds.PhotometricInterpretation = "MONOCHROME2"
+    ds.PixelRepresentation = 1
+    
+    # pydicom.dataset.validate_file_meta(ds.file_meta, enforce_standard=True)
+    
+    # print("Setting pixel data...")
+    ds.PixelData = dcmImg.tobytes()
+    
+    ds.save_as(dcmFileName)
+    
+    return
+    
+
+def writeDicom(dcmFileName, dcmImg, dcmHdr=None):
     '''
     
     Description: Write empty Dicom file
@@ -92,22 +174,21 @@ def writeDicom(dcmFileName, dcmImg):
     # print("Setting file meta information...")
 
     # Populate required values for file meta information
-    meta = pydicom.Dataset()
-    meta.MediaStorageSOPClassUID = pydicom._storage_sopclass_uids.MRImageStorage
+    meta = pydicom.dataset.FileMetaDataset() 
+    meta.MediaStorageSOPClassUID = pydicom._storage_sopclass_uids.DigitalMammographyXRayImageStorageForProcessing
     meta.MediaStorageSOPInstanceUID = pydicom.uid.generate_uid()
     meta.TransferSyntaxUID = pydicom.uid.ExplicitVRLittleEndian  
     
-    ds = pydicom.Dataset()
-    ds.file_meta = meta
+    ds = pydicom.dataset.FileDataset(dcmFileName, {}, file_meta=meta, preamble=b"\0" * 128)
     
     ds.is_little_endian = True
     ds.is_implicit_VR = False
     
-    ds.SOPClassUID = pydicom._storage_sopclass_uids.MRImageStorage
-    ds.PatientName = "Test^Firstname"
-    ds.PatientID = "123456"
+    ds.SOPClassUID = pydicom._storage_sopclass_uids.DigitalMammographyXRayImageStorageForProcessing
+    ds.PatientName = "x"
+    ds.PatientID = "x"
     
-    ds.Modality = "MR"
+    ds.Modality = "DM"
     ds.SeriesInstanceUID = pydicom.uid.generate_uid()
     ds.StudyInstanceUID = pydicom.uid.generate_uid()
     ds.FrameOfReferenceUID = pydicom.uid.generate_uid()
@@ -123,17 +204,13 @@ def writeDicom(dcmFileName, dcmImg):
     ds.Columns = dcmImg.shape[1]
     ds.InstanceNumber = 1
     
-    ds.ImagePositionPatient = r"0\0\1"
-    ds.ImageOrientationPatient = r"1\0\0\0\-1\0"
-    ds.ImageType = r"ORIGINAL\PRIMARY\AXIAL"
-    
     ds.RescaleIntercept = "0"
     ds.RescaleSlope = "1"
     ds.PixelSpacing = r"1\1"
     ds.PhotometricInterpretation = "MONOCHROME2"
     ds.PixelRepresentation = 1
     
-    pydicom.dataset.validate_file_meta(ds.file_meta, enforce_standard=True)
+    # pydicom.dataset.validate_file_meta(ds.file_meta, enforce_standard=True)
     
     # print("Setting pixel data...")
     ds.PixelData = dcmImg.tobytes()
