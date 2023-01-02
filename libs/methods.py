@@ -144,10 +144,10 @@ def get_XYZ_calc_positions(number_calc, cluster_size, calc_window, flags):
     z_pos = number_calc * [None]
     cluster_PDF_history = number_calc * [None]
         
-    microcalc_PDF = gauss3D(calc_window, stdev=60)
+    microcalc_PDF = gauss3D(calc_window, stdev=40)
     microcalc_PDF = 1 - ((microcalc_PDF - microcalc_PDF.min()) / (microcalc_PDF.max() - microcalc_PDF.min()))
     
-    cluster_PDF = gauss3D(cluster_size, stdev=100)
+    cluster_PDF = gauss3D(cluster_size, stdev=80)
         
     for calc_n in range(number_calc):
         
@@ -241,7 +241,7 @@ def get_calc_cluster(pathCalcifications, pathCalcificationsReport, number_calc, 
     df = pd.read_excel(pathCalcificationsReport)
     
     df = df[df['Type'] == 'calc']
-    df = df[df['BB_CountZ'] >= 20]
+    df = df[(df['nVoxels'] <= 6000) & (df['nVoxels'] >= 2000)]
          
     rand_index = np.random.randint(0, df.shape[0], number_calc)
     
@@ -249,7 +249,7 @@ def get_calc_cluster(pathCalcifications, pathCalcificationsReport, number_calc, 
     
     roi_3D = np.zeros(cluster_size)
     
-    contrasts_local = np.hstack((1, np.linspace(0.5,1,100,endpoint=False)[np.random.randint(0,99,number_calc-1)]))
+    contrasts_local = np.hstack((1, np.linspace(0.3,1,100,endpoint=False)[np.random.randint(0,99,number_calc-1)]))
 
     for idX, contrast in enumerate(contrasts_local):
         
