@@ -34,7 +34,7 @@ if __name__ == '__main__':
     pathPatientDensity          = pathPatientCases + '/density'
     pathPatientCalcs            = pathPatientCases + '/calcifications'
     
-    cluster_dimensions  = (20, 20, 20)              # In mm
+    cluster_dimensions  = (20, 20, 10)              # In mm
     
     contrasts = [0.3]
     
